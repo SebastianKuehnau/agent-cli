@@ -94,8 +94,20 @@ inspect and clean up with plain `git` and `sbx` commands.
 
 ```bash
 brew install bats-core     # or: npm install -g bats
-tests/run-tests.sh
+tests/run-tests.sh         # unit + integration; needs no Docker and no network
 ```
+
+The default run deliberately leaves out one group. Run it separately whenever you touch how the
+worktree or the sandbox is mounted:
+
+```bash
+tests/run-tests.sh spike   # real Docker Sandboxes; auto-skips when sbx is unavailable
+```
+
+The spike is what keeps this project's central assumption honest — that a *linked* git worktree keeps
+working inside a sandbox, including committing to the host repository from within it. It is excluded
+from the default run because it creates real sandboxes and takes minutes rather than seconds, so a
+green `tests/run-tests.sh` on its own does not mean that assumption still holds.
 
 See [CLAUDE.md](./CLAUDE.md) for the module layout, the architectural rules, and the testing
 conventions. Background reading lives in [`docs/`](./docs).
