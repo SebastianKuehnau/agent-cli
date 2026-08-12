@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+#
+# agent-task — run an AI coding agent on a git branch, isolated in a git
+# worktree and a Docker Sandbox.
+#
+# Responsibilities of this file: argument parsing, dispatch, help. All real work
+# lives in lib/.
+
+# shellcheck source-path=SCRIPTDIR/../lib
+
+set -uo pipefail
+
+# Resolve our own directory, following symlinks, so a symlinked install
+# (~/.local/bin/agent-task -> /path/to/repo/bin/agent-task) still finds lib/.
+agent_task_self() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [[ -L "$src" ]]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+
+AGENT_BIN_DIR="$(agent_task_self)"
+AGENT_LIB_DIR="${AGENT_BIN_DIR%/bin}/lib"
+
+source "$AGENT_LIB_DIR/logging.sh"
+source "$AGENT_LIB_DIR/naming.sh"
+source "$AGENT_LIB_DIR/git.sh"
+source "$AGENT_LIB_DIR/worktree.sh"
+source "$AGENT_LIB_DIR/sandbox.sh"
+source "$AGENT_LIB_DIR/scaffold.sh"
+source "$AGENT_LIB_DIR/session.sh"
+
+readonly AGENT_DEFAULT_BASE_BRANCH="main"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-task --init
+  agent-task <branch> [--base <branch>]
+
+Commands:
+  --init        Download the Docker Sandbox Kit into the current project.
+  <branch>      Create or reuse the branch, its worktree and its sandbox,
+                then start the agent inside it.
+
+Options:
+  --base        Base branch for a newly created branch. Default: main.
+                Ignored when the branch already exists.
+  --help, -h    Show this help.
+EOF
+}
+
+main() {
+  local branch="" base="$AGENT_DEFAULT_BASE_BRANCH"
+  local do_init=0 base_seen=0
+
+  if (($# == 0)); then
+    usage >&2
+    exit 1
+  fi
+
+  while (($# > 0)); do
+    case "$1" in
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      --init)
+        do_init=1
+        shift
+        ;;
+      --base)
+        if (($# < 2)); then
+          error "--base requires a branch name."
+          usage >&2
+          exit 1
+        fi
+        base="$2"
+        base_seen=1
+        shift 2
+        ;;
+      --base=*)
+        base="${1#--base=}"
+        if [[ -z "$base" ]]; then
+          error "--base requires a branch name."
+          usage >&2
+          exit 1
+        fi
+        base_seen=1
+        shift
+        ;;
+      --)
+        shift
+        ;;
+      -* )
+        error "Unknown option: $1"
+        usage >&2
+        exit 1
+        ;;
+      *)
+        if [[ -n "$branch" ]]; then
+          error "Unexpected extra argument: $1"
+          error "Only one branch name may be given."
+          usage >&2
+          exit 1
+        fi
+        branch="$1"
+        shift
+        ;;
+    esac
+  done
+
+  if ((do_init)); then
+    if [[ -n "$branch" ]]; then
+      error "--init does not take a branch name (got: $branch)"
+      usage >&2
+      exit 1
+    fi
+    if ((base_seen)); then
+      error "--base is not valid with --init."
+      usage >&2
+      exit 1
+    fi
+    cmd_init
+    return
+  fi
+
+  if [[ -z "$branch" ]]; then
+    error "No branch name given."
+    usage >&2
+    exit 1
+  fi
+
+  session_start "$branch" "$base"
+}
+
+cmd_init() {
+  git_require_git
+  git_require_repo
+
+  local main_root
+  main_root="$(git_main_repo_root)" || exit 1
+
+  scaffold_init "$main_root"
+}
+
+main "$@"

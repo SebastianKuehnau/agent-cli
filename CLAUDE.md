@@ -4,21 +4,129 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-This repository is a scaffold with no source code yet. It contains only a README and an IntelliJ
-project configuration (Java module, JDK `zulu-26`, Checkstyle with bundled Sun/Google checks
-enabled). There is no build file (Maven/Gradle), no source directory, and no tests.
+Phase 1 is implemented: `agent-task --init` and `agent-task <branch> [--base <branch>]`, backed by
+Docker Sandboxes (`sbx`). The tool is **bash**, not Java — the `.idea/` directory is a leftover of the
+original scaffold and is not used by the build or the tests.
 
 ## Intent
 
-Per the README, `agent-cli` is meant to become an orchestrator CLI for isolated AI agent
-development: managing Git worktrees, DevContainers/Sandboxes, and pull requests for clean task
-execution.
+`agent-cli` is an orchestrator CLI for isolated AI agent development. The model is
+**branch → worktree → sandbox → agent**: each task gets its own git branch, its own linked git
+worktree, and its own Docker Sandbox running Claude Code.
 
-## Working in this repo right now
+Two analysis documents in `docs/` explain where the design comes from:
 
-- The project is configured for Java (JDK 26 via Zulu) in IntelliJ, so new code should be Java
-  unless the user says otherwise.
-- Checkstyle (Sun Checks + Google Checks) is enabled in the IDE — follow those conventions when
-  writing Java code.
-- Since there is no build tooling yet, if the user asks to start implementing, check with them on
-  which build system (Maven/Gradle) and project layout they want before scaffolding one.
+- `docs/current-script-analysis.md` — a function-by-function dissection of the predecessor tool
+  `claude-task`, including the defects Phase 1 deliberately fixes.
+- `docs/runtime-discussion.md` — the runtime comparison that led to Docker Sandboxes.
+
+## Layout
+
+```
+bin/agent-task       argument parsing, dispatch, help — no git or sbx logic
+lib/logging.sh       info / success / warning / error / die  (everything to stderr)
+lib/naming.sh        pure naming functions: slug, short hash, worktree/sandbox/project ids
+lib/git.sh           repo checks, main-root resolution, branch validation/detection/creation
+lib/worktree.sh      worktree path derivation, registered-worktree lookup, create-or-reuse
+lib/sandbox.sh       sbx presence, existence check, argv construction, execution
+lib/scaffold.sh      `--init` only: create .sbx/kit and download spec.yaml atomically
+lib/session.sh       orchestration of `agent-task <branch>`
+tests/               bats suite (see below)
+```
+
+`bin/agent-task` resolves its own directory through symlinks, so a symlinked install works.
+
+## Architectural rules
+
+These are load-bearing. Breaking one of them breaks the tool's core guarantees.
+
+1. **No persisted session state.** There is no state file, database or lockfile anywhere. Everything
+   is rediscovered per invocation from `git worktree list --porcelain` and `sbx ls -q`. Do not add
+   `.git/agent-cli/`, `~/.agent-cli/sessions/` or equivalent.
+2. **Identifiers are `<slug>-<hash>`, and the hash comes from the raw branch name.** This is what
+   keeps `feature/foo`, `feature-foo` and `Feature/Foo` apart. Never use a bare sanitised branch name
+   as a path or a sandbox name.
+3. **A new branch is created from the resolved base, never from the caller's HEAD.** `--base` defaults
+   to `main`. If the base does not exist locally or as `origin/<base>`, fail — do not fall back.
+4. **An existing branch is reused untouched.** No reset, no rebase, no merge of the base into it.
+5. **Git's registered worktree information is the source of truth.** If a branch already has a
+   worktree, reuse that path even when it differs from the derived one.
+6. **Parse `git worktree list --porcelain` line-oriented, taking the whole remainder of the line as
+   the value.** Splitting on whitespace breaks every path containing a space.
+7. **External commands are invoked through bash arrays**, never by interpolating branch names or
+   paths into a shell string. `lib/sandbox.sh` separates argv construction from execution so the argv
+   can be asserted element by element in tests.
+8. **`--clone` is never passed to `sbx`.** It would run the agent on an in-container clone, breaking
+   the guarantee that edits and commits are immediately visible on the host.
+9. **agent-cli does not manage Claude authentication.** No `~/.claude` copying, no `ANTHROPIC_API_KEY`
+   forwarding. That is Docker Sandboxes' responsibility.
+10. **Every path handed to `sbx` must be the *physical* path.** Git canonicalises paths, so a linked
+    worktree's `.git` pointer always names a physical path. Mounting a symlinked alias instead puts
+    the workspace at a path the pointer does not name, and git inside the sandbox fails with
+    `fatal: not a git repository`. agent-cli gets this right for free by deriving everything from
+    `git_main_repo_root` and `git worktree list`, both of which git reports physically — so never
+    introduce a path from another source (`$PWD`, an argument, `mktemp`) without canonicalising it
+    with `cd -P … && pwd`.
+
+## How the linked worktree works inside the sandbox
+
+A linked worktree's `.git` is a *file* containing an absolute `gitdir:` path into the main
+repository's metadata, and that metadata directory's `commondir` points back again. Neither target
+lives under the worktree.
+
+`sbx` mounts every workspace **at the same absolute path it has on the host**, so agent-cli simply
+passes two workspaces — the worktree, and the main repository's `.git` directory — and both pointers
+resolve unchanged. No path rewriting, no clone, no copy.
+
+`tests/spike/sandbox-worktree.bats` exists specifically to keep this assumption honest.
+
+## Dependencies
+
+Runtime: `bash`, `git`, `curl`, `sbx`. Nothing else — no `jq`, no Node, no `docker` CLI, no `gh`.
+`shasum` (macOS, via perl) or `sha256sum` is used for the short hash; one of the two is always present.
+
+Development only: `bats-core` for the tests and, optionally, `shellcheck`.
+
+## Testing
+
+Tests are part of the implementation, not a follow-up. Every capability has automated tests.
+
+```bash
+tests/run-tests.sh                     # unit + integration (the default)
+tests/run-tests.sh unit
+tests/run-tests.sh integration
+tests/run-tests.sh spike               # real Docker Sandboxes; auto-skips without sbx
+tests/run-tests.sh all
+
+AGENT_TASK_NETWORK_TESTS=1 tests/run-tests.sh unit   # also hits the real kit URL
+
+shellcheck -x -s bash bin/agent-task lib/*.sh
+```
+
+Conventions:
+
+- Git is **never** mocked. Integration tests build real temporary repositories, and remote behaviour
+  uses local bare repositories as `origin` — no GitHub, no network.
+- `sbx` **is** faked, via `make_fake_sbx` in `tests/helpers/common.bash`, which puts a recording stub
+  earlier on `PATH`. It logs one line per argument so argument boundaries can be asserted.
+- Assertions on constructed commands compare argv element by element (`assert_argv`), never a joined
+  string.
+- Tests that depend on the developer's environment must neutralise it — e.g. pass
+  `-c core.excludesFile=/dev/null` when asserting on `git status`.
+- **Fixture paths are canonicalised by `make_tmpdir`.** On macOS `mktemp -d` returns `/var/folders/…`,
+  which is a symlink to `/private/var/folders/…`, while git reports the physical path. Never build a
+  fixture path that bypasses `make_tmpdir`. To reproduce the macOS condition on Linux:
+
+  ```bash
+  mkdir -p /tmp/symroot/real && ln -sfn /tmp/symroot/real /tmp/symroot/link
+  TMPDIR=/tmp/symroot/link tests/run-tests.sh
+  ```
+
+## Scope discipline
+
+Phase 1 is intentionally small. Not implemented, and not to be added without an explicit decision:
+`--done`, `--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--update`, `--version`, `--force`,
+`--rebuild`; pull requests and GitHub integration; branch/worktree/sandbox deletion; test or build
+execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw `docker run`;
+project configuration files; and any generic `runtime_*` abstraction (Docker Sandboxes is the only
+runtime, and a one-implementation interface is unverifiable).
