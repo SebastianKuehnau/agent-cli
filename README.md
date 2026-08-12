@@ -55,6 +55,26 @@ spec to describe your project's toolchain and network policy, then commit it.
 
 An existing `.sbx/kit/spec.yaml` is never overwritten.
 
+### Updating the Sandbox Kit
+
+`.sbx/kit/spec.yaml` is read when a sandbox is **created**. Editing it afterwards has no effect on a
+sandbox that already exists — `agent-task` reuses that sandbox unchanged, kit edits or not.
+
+To apply a changed kit to an existing sandbox today, run this yourself:
+
+```bash
+sbx kit add <sandbox-name> .sbx/kit
+```
+
+`sbx kit add` is currently an **experimental** Docker Sandboxes feature. `agent-task` does not call it
+automatically:
+
+```text
+New sandbox:      agent-task uses .sbx/kit when creating it.
+Existing sandbox: agent-task reuses the existing sandbox unchanged.
+Future Agent CLI: may detect kit changes and use `sbx kit add` automatically — see docs/backlog.md.
+```
+
 ### Work on a task
 
 ```bash
