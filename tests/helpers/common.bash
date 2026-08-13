@@ -188,6 +188,18 @@ case "$1" in
     done
     [[ -n "$name" ]] && printf '%s\n' "$name" >>"${FAKE_SBX_DIR}/sandboxes"
     ;;
+  rm)
+    # Deregister the sandbox so a follow-up existence check fails.
+    name=""
+    for a in "$@"; do
+      [[ "$a" == "--force" || "$a" == "rm" ]] && continue
+      name="$a"
+    done
+    if [[ -n "$name" && -f "${FAKE_SBX_DIR}/sandboxes" ]]; then
+      grep -vx "$name" "${FAKE_SBX_DIR}/sandboxes" >"${FAKE_SBX_DIR}/sandboxes.tmp" || true
+      mv "${FAKE_SBX_DIR}/sandboxes.tmp" "${FAKE_SBX_DIR}/sandboxes"
+    fi
+    ;;
   run) : ;;
 esac
 exit "${FAKE_SBX_EXIT:-0}"

@@ -17,9 +17,21 @@ to `git` immediately — the sandbox is the isolation boundary, not a copy of yo
 
 ## Install
 
+Two ways to install, each updated differently:
+
+**Git checkout** — `bin/` and `lib/` stay side by side; update with `git pull`.
+
 ```bash
 git clone https://github.com/SebastianKuehnau/agent-cli.git
 ln -s "$PWD/agent-cli/bin/agent-task" ~/.local/bin/agent-task
+```
+
+**Single file** — download the self-contained release bundle; update with `agent-task --update`.
+
+```bash
+curl -Lo ~/.local/bin/agent-task \
+  https://github.com/SebastianKuehnau/agent-cli/releases/latest/download/agent-task
+chmod +x ~/.local/bin/agent-task
 ```
 
 ## Usage
@@ -28,11 +40,18 @@ ln -s "$PWD/agent-cli/bin/agent-task" ~/.local/bin/agent-task
 Usage:
   agent-task --init
   agent-task <branch> [--base <branch>]
+  agent-task --done <branch>
+  agent-task --update
 
 Commands:
   --init        Download the Docker Sandbox Kit into the current project.
   <branch>      Create or reuse the branch, its worktree and its sandbox,
                 then start the agent inside it.
+  --done        Remove the sandbox and worktree for <branch>. The branch
+                itself is kept.
+  --update      Download and install the latest agent-task release. Only
+                works for a single-file install; a git checkout is updated
+                with 'git pull' instead.
 
 Options:
   --base        Base branch for a newly created branch. Default: main.
@@ -110,6 +129,30 @@ collide.
 There is no state file. Everything is rediscovered from `git worktree list` and `sbx ls`, so you can
 inspect and clean up with plain `git` and `sbx` commands.
 
+### Tear down a task
+
+```bash
+agent-task --done feature/new-crud
+```
+
+Removes the sandbox and the worktree for `feature/new-crud`, if they exist. The branch itself is
+always kept — `--done` tears down the ephemeral parts of a task, not the branch it lives on. It is
+idempotent: running it again when nothing is left just reports that.
+
+If the worktree has uncommitted or untracked changes, `--done` refuses to remove it (git's own
+worktree-removal safety check, not a separate one agent-cli adds) rather than silently discarding
+work. Commit, stash, or remove those changes and run it again.
+
+### Updating agent-task
+
+```bash
+agent-task --update
+```
+
+Downloads and installs the latest release in place. This only works for a single-file install (see
+[Install](#install) above) — a git checkout has nothing for `--update` to replace, and is told to run
+`git pull` instead.
+
 ## Development
 
 ```bash
@@ -128,6 +171,13 @@ The spike is what keeps this project's central assumption honest — that a *lin
 working inside a sandbox, including committing to the host repository from within it. It is excluded
 from the default run because it creates real sandboxes and takes minutes rather than seconds, so a
 green `tests/run-tests.sh` on its own does not mean that assumption still holds.
+
+### Releasing
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the single-file bundle with
+`scripts/build-bundle.sh` and publishes it as that release's `agent-task` asset — the exact file
+`agent-task --update` downloads. `bin/` and `lib/` remain the source of truth; the bundle is a
+release-time build artifact, not something committed to the repository.
 
 See [CLAUDE.md](./CLAUDE.md) for the module layout, the architectural rules, and the testing
 conventions. Background reading lives in [`docs/`](./docs).

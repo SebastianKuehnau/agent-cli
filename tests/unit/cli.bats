@@ -52,9 +52,16 @@ cli() {
   cli --help
   assert_success
   local flag
-  for flag in --submit --done --sync --status --shell --plan --update --version --force --rebuild; do
+  for flag in --submit --sync --status --shell --plan --version --force --rebuild; do
     assert_output_not_contains "$flag"
   done
+}
+
+@test "help documents --done and --update" {
+  cli --help
+  assert_success
+  assert_output_contains "--done"
+  assert_output_contains "--update"
 }
 
 # --- no arguments -----------------------------------------------------------
@@ -111,6 +118,55 @@ cli() {
   assert_failure
   [[ "$stderr" == *"--base is not valid with --init"* ]] ||
     fail "unexpected stderr: $stderr"
+}
+
+@test "--done without a branch name is rejected" {
+  cli --done
+  assert_failure
+  [[ "$stderr" == *"No branch name given"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "--done with --base is rejected" {
+  cli --done feature/x --base develop
+  assert_failure
+  [[ "$stderr" == *"--base is not valid with --done"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--done and --init together are rejected" {
+  cli --done --init
+  assert_failure
+  [[ "$stderr" == *"Only one of --init, --done, --update may be given"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--update with a branch name is rejected" {
+  cli --update feature/x
+  assert_failure
+  [[ "$stderr" == *"--update does not take a branch name"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--update with --base is rejected" {
+  cli --update --base develop
+  assert_failure
+  [[ "$stderr" == *"--base is not valid with --update"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--update and --done together are rejected" {
+  cli --update --done feature/x
+  assert_failure
+  [[ "$stderr" == *"Only one of --init, --done, --update may be given"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--update refuses to run against a git checkout with lib/ present" {
+  cli --update
+  assert_failure
+  [[ "$stderr" == *"git checkout"* ]] || fail "unexpected stderr: $stderr"
+  [[ "$stderr" == *"git -C"* && "$stderr" == *"pull"* ]] ||
+    fail "missing git pull hint: $stderr"
 }
 
 @test "an invalid branch name is rejected before anything is created" {

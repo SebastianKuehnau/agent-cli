@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Orchestration for `agent-task <branch> [--base <branch>]`.
+# Orchestration for `agent-task <branch> [--base <branch>]` and
+# `agent-task --done <branch>`.
 #
 # This module only sequences the other modules; it contains no git plumbing, no
 # path derivation and no sbx argument construction of its own.
@@ -58,4 +59,47 @@ session_start() {
   fi
 
   sandbox_attach "$sandbox"
+}
+
+# session_done <branch>
+#
+# Remove the sandbox and the worktree for a branch, if they exist. The branch
+# itself is always kept — this is teardown of the ephemeral parts of the
+# branch -> worktree -> sandbox -> agent model, not branch deletion.
+#
+# Sandbox and worktree removal are independent: each is checked and removed
+# on its own, so a worktree that was removed by hand can never block cleanup
+# of an orphaned sandbox, or vice versa.
+session_done() {
+  local branch="$1"
+
+  git_require_git
+  git_require_repo
+  sandbox_require_cli
+
+  git_validate_branch "$branch"
+
+  local main_root
+  main_root="$(git_main_repo_root)" || exit 1
+
+  local project sandbox
+  project="$(naming_project_id "$main_root")"
+  sandbox="$(naming_sandbox_name "$project" "$branch")"
+
+  if sandbox_exists "$sandbox"; then
+    info "Removing sandbox '$sandbox'"
+    sandbox_remove "$sandbox"
+  else
+    info "No sandbox found for '$branch'"
+  fi
+
+  local worktree
+  if worktree="$(worktree_find_for_branch "$main_root" "$branch")"; then
+    info "Removing worktree: $worktree"
+    worktree_remove "$main_root" "$worktree"
+  else
+    info "No worktree found for '$branch'"
+  fi
+
+  success "Branch '$branch' was kept."
 }

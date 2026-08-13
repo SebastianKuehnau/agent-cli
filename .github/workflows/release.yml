@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Build the single-file bundle
+        run: scripts/build-bundle.sh > agent-task
+
+      - name: ShellCheck the built bundle
+        run: shellcheck -x -s bash agent-task
+
+      - name: Make the bundle executable
+        run: chmod +x agent-task
+
+      - name: Create the release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" agent-task \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

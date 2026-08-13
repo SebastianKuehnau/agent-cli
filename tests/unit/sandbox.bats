@@ -184,3 +184,48 @@ setup() {
   [[ "$stderr" == *"Failed to create the sandbox 'agent-x-123456'"* ]] ||
     fail "unexpected stderr: $stderr"
 }
+
+# --- remove argv -------------------------------------------------------------
+
+@test "remove argv has the expected shape" {
+  sandbox_build_remove_argv "agent-my-app-feature-x-abc123"
+  assert_argv sbx rm --force "agent-my-app-feature-x-abc123"
+}
+
+@test "remove argv keeps a name containing hyphens intact" {
+  sandbox_build_remove_argv "agent-a-b-c-d-e-123456"
+  assert_argv sbx rm --force "agent-a-b-c-d-e-123456"
+}
+
+# --- remove execution ---------------------------------------------------------
+
+@test "sandbox_remove invokes sbx with the constructed argv" {
+  fake_sbx_add_sandbox "agent-x-123456"
+  run sandbox_remove "agent-x-123456"
+  assert_success
+
+  run cat "$FAKE_SBX_DIR/calls.log"
+  assert_output_contains "arg:rm"
+  assert_output_contains "arg:--force"
+  assert_output_contains "arg:agent-x-123456"
+}
+
+@test "sandbox_remove makes the sandbox no longer exist" {
+  fake_sbx_add_sandbox "agent-x-123456"
+  run sandbox_remove "agent-x-123456"
+  assert_success
+
+  run sandbox_exists "agent-x-123456"
+  assert_failure
+}
+
+@test "sandbox_remove reports a useful error when sbx fails" {
+  run --separate-stderr env FAKE_SBX_EXIT=1 bash -c "
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/sandbox.sh'
+    sandbox_remove 'agent-x-123456'
+  "
+  assert_failure
+  [[ "$stderr" == *"Failed to remove the sandbox 'agent-x-123456'"* ]] ||
+    fail "unexpected stderr: $stderr"
+}

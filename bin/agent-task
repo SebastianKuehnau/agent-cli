@@ -10,8 +10,9 @@
 
 set -uo pipefail
 
-# Resolve our own directory, following symlinks, so a symlinked install
-# (~/.local/bin/agent-task -> /path/to/repo/bin/agent-task) still finds lib/.
+# Resolve our own physical file path, following symlinks, so a symlinked
+# install (~/.local/bin/agent-task -> /path/to/repo/bin/agent-task) still
+# finds lib/, and so --update knows exactly which file to overwrite.
 agent_task_self() {
   local src="${BASH_SOURCE[0]}" dir
   while [[ -L "$src" ]]; do
@@ -19,10 +20,12 @@ agent_task_self() {
     src="$(readlink "$src")"
     [[ "$src" != /* ]] && src="$dir/$src"
   done
-  cd -P "$(dirname "$src")" && pwd
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  printf '%s/%s' "$dir" "$(basename "$src")"
 }
 
-AGENT_BIN_DIR="$(agent_task_self)"
+AGENT_SELF="$(agent_task_self)"
+AGENT_BIN_DIR="$(dirname "$AGENT_SELF")"
 AGENT_LIB_DIR="${AGENT_BIN_DIR%/bin}/lib"
 
 source "$AGENT_LIB_DIR/logging.sh"
@@ -32,6 +35,7 @@ source "$AGENT_LIB_DIR/worktree.sh"
 source "$AGENT_LIB_DIR/sandbox.sh"
 source "$AGENT_LIB_DIR/scaffold.sh"
 source "$AGENT_LIB_DIR/session.sh"
+source "$AGENT_LIB_DIR/selfupdate.sh"
 
 readonly AGENT_DEFAULT_BASE_BRANCH="main"
 
@@ -40,11 +44,18 @@ usage() {
 Usage:
   agent-task --init
   agent-task <branch> [--base <branch>]
+  agent-task --done <branch>
+  agent-task --update
 
 Commands:
   --init        Download the Docker Sandbox Kit into the current project.
   <branch>      Create or reuse the branch, its worktree and its sandbox,
                 then start the agent inside it.
+  --done        Remove the sandbox and worktree for <branch>. The branch
+                itself is kept.
+  --update      Download and install the latest agent-task release. Only
+                works for a single-file install; a git checkout is updated
+                with 'git pull' instead.
 
 Options:
   --base        Base branch for a newly created branch. Default: main.
@@ -55,7 +66,7 @@ EOF
 
 main() {
   local branch="" base="$AGENT_DEFAULT_BASE_BRANCH"
-  local do_init=0 base_seen=0
+  local do_init=0 do_done=0 do_update=0 base_seen=0
 
   if (($# == 0)); then
     usage >&2
@@ -70,6 +81,14 @@ main() {
         ;;
       --init)
         do_init=1
+        shift
+        ;;
+      --done)
+        do_done=1
+        shift
+        ;;
+      --update)
+        do_update=1
         shift
         ;;
       --base)
@@ -113,6 +132,13 @@ main() {
     esac
   done
 
+  local mode_count=$((do_init + do_done + do_update))
+  if ((mode_count > 1)); then
+    error "Only one of --init, --done, --update may be given."
+    usage >&2
+    exit 1
+  fi
+
   if ((do_init)); then
     if [[ -n "$branch" ]]; then
       error "--init does not take a branch name (got: $branch)"
@@ -125,6 +151,36 @@ main() {
       exit 1
     fi
     cmd_init
+    return
+  fi
+
+  if ((do_update)); then
+    if [[ -n "$branch" ]]; then
+      error "--update does not take a branch name (got: $branch)"
+      usage >&2
+      exit 1
+    fi
+    if ((base_seen)); then
+      error "--base is not valid with --update."
+      usage >&2
+      exit 1
+    fi
+    cmd_update
+    return
+  fi
+
+  if ((do_done)); then
+    if ((base_seen)); then
+      error "--base is not valid with --done."
+      usage >&2
+      exit 1
+    fi
+    if [[ -z "$branch" ]]; then
+      error "No branch name given."
+      usage >&2
+      exit 1
+    fi
+    session_done "$branch"
     return
   fi
 
@@ -145,6 +201,16 @@ cmd_init() {
   main_root="$(git_main_repo_root)" || exit 1
 
   scaffold_init "$main_root"
+}
+
+cmd_update() {
+  if [[ -d "$AGENT_LIB_DIR" ]]; then
+    die "This install uses separate lib/ files (a git checkout)." \
+      "There is nothing for --update to replace here. Update it with:" \
+      "  git -C '${AGENT_LIB_DIR%/lib}' pull"
+  fi
+
+  selfupdate_run "$AGENT_SELF"
 }
 
 main "$@"

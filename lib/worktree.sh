@@ -143,3 +143,23 @@ worktree_ensure() {
 
   printf '%s' "$path"
 }
+
+# worktree_remove <main-repo-root> <path>
+#
+# Remove a worktree. Deliberately never passes --force: git already refuses
+# when the worktree has modified or untracked files, which is the only real
+# hazard here. Unpushed commits are not a hazard at all, because agent-cli
+# never deletes the branch — its ref keeps them reachable regardless of
+# whether the worktree that once held them still exists.
+worktree_remove() {
+  local main_root="$1" path="$2"
+
+  git -C "$main_root" worktree remove "$path" >&2 ||
+    die "Failed to remove the worktree at:" \
+      "  $path" \
+      "It may contain uncommitted or untracked changes. Commit, stash, or" \
+      "remove them, then run agent-task --done again." \
+      "" \
+      "To remove it anyway and discard those changes, run:" \
+      "  git -C '$main_root' worktree remove --force '$path'"
+}

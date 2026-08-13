@@ -8,6 +8,10 @@ Phase 1 is implemented: `agent-task --init` and `agent-task <branch> [--base <br
 Docker Sandboxes (`sbx`). The tool is **bash**, not Java — the `.idea/` directory is a leftover of the
 original scaffold and is not used by the build or the tests.
 
+`--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), which
+is why they are no longer in the Phase 1 exclusion list under "Scope discipline" below. Everything
+else in that list still applies.
+
 ## Intent
 
 `agent-cli` is an orchestrator CLI for isolated AI agent development. The model is
@@ -27,10 +31,13 @@ bin/agent-task       argument parsing, dispatch, help — no git or sbx logic
 lib/logging.sh       info / success / warning / error / die  (everything to stderr)
 lib/naming.sh        pure naming functions: slug, short hash, worktree/sandbox/project ids
 lib/git.sh           repo checks, main-root resolution, branch validation/detection/creation
-lib/worktree.sh      worktree path derivation, registered-worktree lookup, create-or-reuse
+lib/worktree.sh      worktree path derivation, registered-worktree lookup, create-or-reuse/remove
 lib/sandbox.sh       sbx presence, existence check, argv construction, execution
 lib/scaffold.sh      `--init` only: create .sbx/kit and download spec.yaml atomically
-lib/session.sh       orchestration of `agent-task <branch>`
+lib/session.sh       orchestration of `agent-task <branch>` and `agent-task --done <branch>`
+lib/selfupdate.sh    `--update` only: download and install the latest release in place
+scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
+                         artifact `.github/workflows/release.yml` publishes; not runtime code
 tests/               bats suite (see below)
 ```
 
@@ -124,9 +131,46 @@ Conventions:
 
 ## Scope discipline
 
-Phase 1 is intentionally small. Not implemented, and not to be added without an explicit decision:
-`--done`, `--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--update`, `--version`, `--force`,
-`--rebuild`; pull requests and GitHub integration; branch/worktree/sandbox deletion; test or build
-execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw `docker run`;
-project configuration files; and any generic `runtime_*` abstraction (Docker Sandboxes is the only
-runtime, and a one-implementation interface is unverifiable).
+Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
+(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below. Still not implemented, and
+not to be added without a further explicit decision: `--submit`, `--sync`, `--status`, `--shell`,
+`--plan`, `--version`, `--force`, `--rebuild`; pull requests and GitHub integration; branch deletion;
+test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
+`docker run`; project configuration files; and any generic `runtime_*` abstraction (Docker Sandboxes is
+the only runtime, and a one-implementation interface is unverifiable).
+
+## How `--done` tears down a task
+
+`session_done` (`lib/session.sh`) removes the sandbox and the worktree for a branch — never the
+branch itself — and treats the two removals as independent: it checks and removes each on its own,
+so a worktree that was deleted by hand can never block cleanup of an orphaned sandbox, or vice versa.
+
+Worktree removal (`worktree_remove`, `lib/worktree.sh`) deliberately never passes `--force` to
+`git worktree remove`. Git already refuses when the worktree has modified or untracked files, which
+is the only real hazard: because the branch is never deleted, unpushed *commits* are never at risk —
+the branch ref keeps them reachable whether or not a worktree for it still exists. Do not add an
+agent-cli-level `--force` for this without an explicit decision (see "Scope discipline" above);
+a user who wants to override git's own refusal can already do so directly with
+`git worktree remove --force`.
+
+## How `--update` and the release bundle fit together
+
+`bin/agent-task` + `lib/*.sh` is the only source layout and stays that way — it is what makes every
+module unit-testable. `scripts/build-bundle.sh` is a release-time build step, not a second
+implementation: it concatenates the lib files and `bin/agent-task` (minus its `source
+"$AGENT_LIB_DIR/..."` lines) into one self-contained file with no text surgery beyond dropping those
+lines. `.github/workflows/release.yml` runs it on every `v*` tag push and publishes the result as
+that release's `agent-task` asset.
+
+`cmd_update` (`bin/agent-task`) tells the two supported install shapes apart by checking whether
+`$AGENT_LIB_DIR` exists: if it does, this is a git checkout (or a symlink into one) and `--update` has
+nothing of its own to replace, so it refuses with a `git pull` hint; if it does not, this is a
+single-file bundle install and `--update` downloads the latest release over it in place
+(`lib/selfupdate.sh`, mirroring `scaffold_init`'s atomic-download pattern). This is also the fix for
+the original bug report (issue #5): a bundle has no `source` lines to fail on in the first place, so
+it can never hit the "`lib/*.sh`: No such file or directory" crash that a single file dropped next to
+a `--init`-only script could.
+
+`--update` always re-downloads; there is no version comparison and no embedded version marker in the
+bundle. Issue #3 did not ask for a "already up to date" short-circuit, so none was built — do not add
+one without a reason to.

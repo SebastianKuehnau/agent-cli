@@ -88,3 +88,16 @@ sandbox_attach() {
   sandbox_build_attach_argv "$1"
   exec "${AGENT_SBX_ARGV[@]}"
 }
+
+# sandbox_build_remove_argv <name>
+sandbox_build_remove_argv() {
+  AGENT_SBX_ARGV=(sbx rm --force "$1")
+}
+
+# sandbox_remove <name>
+sandbox_remove() {
+  sandbox_build_remove_argv "$@"
+  "${AGENT_SBX_ARGV[@]}" ||
+    die "Failed to remove the sandbox '$1'." \
+      "The sbx output above should explain why."
+}
