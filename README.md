@@ -91,7 +91,7 @@ automatically:
 ```text
 New sandbox:      agent-task uses .sbx/kit when creating it.
 Existing sandbox: agent-task reuses the existing sandbox unchanged.
-Future Agent CLI: may detect kit changes and use `sbx kit add` automatically — see docs/backlog.md.
+Future Agent CLI: may detect kit changes and use `sbx kit add` automatically — see issue #7.
 ```
 
 ### Work on a task
