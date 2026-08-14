@@ -42,6 +42,35 @@ error() {
   printf '%s%s error:%s %s\n' "$AGENT_C_RED" "$AGENT_LOG_PREFIX" "$AGENT_C_RESET" "$*" >&2
 }
 
+# confirm_is_yes <reply> — is <reply> an explicit yes?
+#
+# Only "y" and "yes", in any case. Everything else, the empty string included,
+# is a no. Kept separate from confirm so the decision is unit-testable without a
+# pseudo-terminal.
+confirm_is_yes() {
+  [[ "$1" == [yY] || "$1" == [yY][eE][sS] ]]
+}
+
+# confirm <question> — ask on stderr, read the answer from stdin.
+#
+# Returns 0 only for an explicit yes. Anything else — "n", empty, EOF, or a
+# stdin that is not a terminal — is a no: a question nobody can answer must
+# never be read as consent.
+#
+# Callers are expected to print the context *before* calling this, so that it is
+# visible even when there is no terminal to ask at.
+confirm() {
+  [[ -t 0 ]] || return 1
+
+  printf '%s%s%s %s [y/N] ' \
+    "$AGENT_C_YELLOW" "$AGENT_LOG_PREFIX" "$AGENT_C_RESET" "$1" >&2
+
+  local reply=""
+  IFS= read -r reply || return 1
+
+  confirm_is_yes "$reply"
+}
+
 # die [message...] — report and exit 1. Multiple arguments become multiple lines
 # so callers can append an actionable hint without embedding newlines.
 die() {

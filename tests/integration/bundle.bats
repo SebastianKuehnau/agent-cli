@@ -81,12 +81,20 @@ setup() {
 
   run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
 
   printf 'schemaVersion: "2"\nname: changed\n' >"$repo/.sbx/kit/spec.yaml"
-  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
+  run --separate-stderr env TASK_AGENT_KIT_RECREATE=yes \
+    bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
-  [[ "$stderr" == *"Sandbox Kit changed"* ]] || fail "unexpected stderr: $stderr"
-  assert_equal "$(fake_sbx_kit_call_count)" "1"
+  [[ "$stderr" == *"Recreated"* ]] || fail "unexpected stderr: $stderr"
+
+  run grep -E '^arg:(create|rm|run|ls)$' "$FAKE_SBX_DIR/calls.log"
+  assert_success
+  assert_equal "$output" "arg:ls
+arg:rm
+arg:create
+arg:run"
 }
 
 @test "the bundle reports the same version as the checkout" {

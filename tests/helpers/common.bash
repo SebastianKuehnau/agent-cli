@@ -201,8 +201,9 @@ case "$1" in
     fi
     ;;
   kit)
-    # `sbx kit add` is experimental, so its failure has to be testable on its
-    # own, separately from the other subcommands.
+    # task-agent does not use `sbx kit` (see tests/spike/sandbox-kit.bats), so
+    # this branch exists only so that a regression calling it is visible in the
+    # log rather than silently succeeding as an unknown subcommand.
     exit "${FAKE_SBX_KIT_EXIT:-${FAKE_SBX_EXIT:-0}}"
     ;;
   run) : ;;

@@ -4,8 +4,8 @@
 # (lib/kit.sh) that together let `task-agent <branch>` notice a changed kit
 # (issue #7).
 #
-# The digest is what decides whether a sandbox gets `sbx kit add` applied to it,
-# so the tests below are mostly about what must and must not change it.
+# The digest is what decides whether a sandbox is offered for rebuilding, so the
+# tests below are mostly about what must and must not change it.
 
 bats_require_minimum_version 1.5.0
 

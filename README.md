@@ -97,29 +97,46 @@ An existing `.sbx/kit/spec.yaml` is never overwritten.
 
 ### Updating the Sandbox Kit
 
-Edit `.sbx/kit` whenever your project's toolchain or network policy changes, then just run
-`task-agent <branch>` again. It notices and applies the change:
+Edit `.sbx/kit` whenever your project's toolchain or network policy changes, then run
+`task-agent <branch>` again. It notices:
 
 ```text
 New sandbox:      task-agent uses .sbx/kit when creating it.
-Existing sandbox: task-agent compares .sbx/kit against the kit that sandbox already has,
-                  and runs `sbx kit add` for you when they differ.
+Existing sandbox: task-agent compares .sbx/kit against the kit that sandbox was built from,
+                  and offers to rebuild the sandbox when they differ.
 Unchanged kit:    nothing happens.
 ```
 
 The comparison covers the whole `.sbx/kit` directory — not just `spec.yaml` — so editing, adding,
 removing or renaming any file in it counts as a change. Moving your checkout somewhere else does not.
 
-`sbx kit add` is an **experimental** Docker Sandboxes feature, so `task-agent` never lets it stand
-between you and your agent: if it fails or your `sbx` does not have it, you get a warning and the
-command to run yourself, and the agent starts anyway in the sandbox as it is.
+**Applying a kit means recreating the sandbox.** Docker Sandboxes has no in-place kit update: `sbx kit
+add` only *appends* a kit to a sandbox, and recreates the sandbox to do even that. So `task-agent`
+asks first, and tells you what is at stake:
 
-```bash
-sbx kit add <sandbox-name> .sbx/kit
+```text
+[task-agent] warning: The Sandbox Kit changed since sandbox 'agent-my-app-…' was created.
+[task-agent] warning: Applying it recreates that sandbox — Docker Sandboxes has no in-place
+[task-agent] warning: kit update — so anything that exists only inside the container is lost,
+[task-agent] warning: the agent's session state in there included.
+[task-agent] warning: The worktree on the host, its files and its commits are not affected.
+[task-agent] Recreate 'agent-my-app-…' from the current kit? [y/N]
 ```
 
-Which kit a sandbox last had is remembered in `.git/agent-cli/kit/` in your repository. It is a cache,
-not state: delete it and the worst that happens is the kit gets applied once more than needed.
+Answer `n` and the sandbox is left exactly as it was; you are asked again next time, so nothing is
+silently forgotten. Set `TASK_AGENT_KIT_RECREATE` to skip the question:
+
+```bash
+TASK_AGENT_KIT_RECREATE=yes task-agent feature/new-crud   # rebuild without asking
+TASK_AGENT_KIT_RECREATE=no  task-agent feature/new-crud   # never rebuild, just report
+```
+
+Without a terminal to ask at (a script, CI), the answer is no and `task-agent` says so rather than
+rebuilding your sandbox unasked.
+
+Which kit a sandbox was built from is remembered in `.git/agent-cli/kit/` in your repository. It is a
+cache, not state: delete it and the only consequence is that those sandboxes are treated as up to date
+again, so the next kit change is the one that gets offered.
 
 ### Work on a task
 
@@ -210,7 +227,7 @@ tests/run-tests.sh spike   # real Docker Sandboxes; auto-skips when sbx is unava
 
 The spike is what keeps this project's assumptions about Docker Sandboxes honest — that a *linked* git
 worktree keeps working inside a sandbox, including committing to the host repository from within it,
-and that the experimental `sbx kit add` really does apply a changed kit to an existing sandbox. It is
+and that recreating a sandbox really does apply a changed kit to it. It is
 excluded from the default run because it creates real sandboxes and takes minutes rather than seconds,
 so a green `tests/run-tests.sh` on its own does not mean those assumptions still hold.
 

@@ -89,24 +89,23 @@ sandbox_attach() {
   exec "${AGENT_SBX_ARGV[@]}"
 }
 
-# sandbox_build_kit_add_argv <name> <kit-dir>
-sandbox_build_kit_add_argv() {
-  AGENT_SBX_ARGV=(sbx kit add "$1" "$2")
-}
-
-# sandbox_apply_kit <name> <kit-dir>
+# There is deliberately no `sbx kit add` wrapper here. It cannot express "this
+# kit changed": by its own documentation it recreates the sandbox "with the new
+# kit appended to its original kit list", so re-adding the project's own kit
+# fails with
 #
-# Apply a Sandbox Kit to an *existing* sandbox, returning non-zero on failure
-# rather than dying — unlike every other sbx call in this file.
+#   compose: duplicate kit name "<name>" — each kit in a composition must have
+#   a unique name
 #
-# That is on purpose: `sbx kit add` is an experimental Docker Sandboxes feature,
-# so an installed sbx may not have it at all, and its contract may change. A
-# sandbox running a slightly stale kit is a far better outcome than task-agent
-# refusing to start the agent, so the caller warns and carries on.
-sandbox_apply_kit() {
-  sandbox_build_kit_add_argv "$@"
-  "${AGENT_SBX_ARGV[@]}"
-}
+# which is what tests/spike/sandbox-kit.bats demonstrates against the real CLI.
+# `sbx kit` offers add, inspect, pack, pull, push and validate — there is no
+# replace or remove to reach for either.
+#
+# Since applying a kit recreates the sandbox regardless, a changed kit is applied
+# here by remove-then-create, using commands the spike already covers. The one
+# thing given up is that `sbx kit add`'s own swap preserves kit-owned volumes
+# (agent session state) while `sbx rm` does not — which is why the user is asked
+# first. See lib/session.sh's session_sync_kit.
 
 # sandbox_build_remove_argv <name>
 sandbox_build_remove_argv() {

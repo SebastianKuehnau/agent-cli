@@ -199,8 +199,33 @@ a `--init`-only script could.
 ## How a changed Sandbox Kit reaches an existing sandbox
 
 `.sbx/kit` is read by `sbx create`. Before issue #7, editing it afterwards had no effect until the
-sandbox was recreated by hand. Now `session_start` compares the kit against the one the sandbox
-already has and applies it with `sbx kit add` when they differ.
+sandbox was recreated by hand. Now `session_start` compares the kit against the one the sandbox was
+built from and offers to rebuild it when they differ.
+
+**Applying a kit means recreating the sandbox, and `sbx kit add` is not usable for this.** That was
+established by running `tests/spike/sandbox-kit.bats` against a real sbx, and it is the reason the
+implementation looks the way it does:
+
+- `sbx kit add <name> <kit-dir>` recreates the sandbox "with the new kit **appended to its original
+  kit list**" (its own `--help`). Handing it the project's own, already-applied kit therefore fails
+  with `compose: duplicate kit name "<name>"`. The kit's name identifies the project's kit and does not
+  change when its contents do, so this is the normal case, not an edge case — `sbx kit add` cannot
+  express "this kit changed".
+- There is nothing else to reach for: `sbx kit` offers `add`, `inspect`, `pack`, `pull`, `push` and
+  `validate`. No replace, no remove.
+- Applying a kit recreates the sandbox regardless. So `sandbox_remove` + `sandbox_create` is not a
+  workaround; it is the same operation via commands the spike verifies.
+
+One real trade-off comes with that. `sbx kit add`'s swap preserves kit-owned volumes — explicitly
+including agent session state — whereas `sbx rm` does not, so recreating loses the agent's session
+inside that sandbox. Getting the preserving behaviour would mean rewriting the kit's `name` per
+version so it appends as a *new* kit, which means YAML surgery without a parser and a kit list that
+grows forever, with the old kit's settings still composed in — i.e. "add a mixin", not "apply the
+current kit". That is why the loss is accepted and the user is asked instead.
+
+Do not reintroduce a `sbx kit add` call path without re-running that spike first. Note it also refuses
+sandboxes created before its recreate feature shipped, so it could never have been depended on
+unconditionally.
 
 Three pieces, deliberately separate:
 
@@ -208,25 +233,33 @@ Three pieces, deliberately separate:
   path, executable bit and content, in `LC_ALL=C` order. Paths are in the digest so a pure rename
   counts as a change; the digest is independent of where the checkout lives, so moving a repository
   does not look like a kit change.
-- `lib/kit.sh` remembers the digest last applied, per sandbox. See architectural rule 1 for the
-  invariant that keeps this a cache rather than session state.
-- `sandbox_apply_kit` (`lib/sandbox.sh`) is the only sbx call in the file that **returns** a failure
-  instead of calling `die`.
+- `lib/kit.sh` remembers the digest a sandbox was built from, per sandbox. See architectural rule 1
+  for the invariant that keeps this a cache rather than session state.
+- `session_sync_kit` and `session_kit_should_recreate` (`lib/session.sh`) decide and act.
 
-That last point is the load-bearing one. `sbx kit add` is an *experimental* Docker Sandboxes feature:
-it may be missing from an installed sbx, and its contract may change. So `session_sync_kit`
-(`lib/session.sh`) warns, prints the equivalent manual command, and starts the agent anyway — a
-slightly stale sandbox beats a tool that refuses to run. On that path the digest is deliberately
-**not** recorded, so the next run retries instead of inheriting a false "already applied".
+Because recreating destroys anything living only inside the container, it is never silent. The default
+is to ask (`confirm` in `lib/logging.sh`), and `TASK_AGENT_KIT_RECREATE` overrides that with `yes` or
+`no`. Three rules hold that together:
 
-A sandbox with no cache entry — created by an older task-agent, or whose entry was lost — has an
-unknown kit, so the kit is applied. Applying an unchanged kit is wasteful; skipping a changed one is
-the bug this exists to prevent. `--done` drops the entry, otherwise it would later claim that a
-freshly created sandbox of the same name already has that kit.
+1. **No terminal means no.** In `ask` mode with a non-TTY stdin (a script, CI), `task-agent` reports
+   the change and leaves the sandbox alone. Consent cannot be inferred from silence, and a piped
+   "yes" is not a terminal either — `TASK_AGENT_KIT_RECREATE=yes` is the supported way to say yes
+   non-interactively.
+2. **A skip is never recorded.** Declining, `no`, and the non-TTY path all leave the digest untouched,
+   so the next run offers again rather than treating the old kit as current.
+3. **An invalid `TASK_AGENT_KIT_RECREATE` fails.** Treating a typo as `no` would silently switch kit
+   updates off.
 
-`tests/spike/sandbox-kit.bats` is what keeps the `sbx kit add` assumption honest — it is the only
-place the real, experimental CLI contract is exercised, and it skips itself when sbx is unavailable.
-A green `tests/run-tests.sh` therefore does **not** mean `sbx kit add` still works as assumed.
+A sandbox with **no** cache entry — created by an older task-agent, or whose entry was lost — is
+*adopted*: the current digest is recorded and nothing is rebuilt. Rebuilding would destroy a sandbox
+nobody asked us to touch (every existing sandbox, on the first run after upgrading), and the cost of
+adopting is missing at most one kit change — exactly the pre-issue-#7 behaviour. Do not "improve" this
+into a rebuild. `--done` drops the entry, otherwise it would later claim that a freshly created
+sandbox of the same name already has that kit.
+
+`tests/spike/sandbox-kit.bats` is the only place the real CLI contract is exercised, and it skips
+itself when sbx is unavailable. A green `tests/run-tests.sh` therefore says nothing about whether
+Docker Sandboxes still behaves as described above.
 
 ## How the version and `--update`'s version check work
 

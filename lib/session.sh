@@ -16,6 +16,11 @@ if [[ -n "${AGENT_SESSION_SH_LOADED:-}" ]]; then
 fi
 AGENT_SESSION_SH_LOADED=1
 
+# What to do when the Sandbox Kit changed under an existing sandbox: ask (the
+# default), yes (recreate without asking), no (never recreate). Applying a kit
+# means recreating the sandbox, so this is deliberately not silent by default.
+: "${TASK_AGENT_KIT_RECREATE:=ask}"
+
 # session_start <branch> <base>
 session_start() {
   local branch="$1" base="$2"
@@ -55,7 +60,7 @@ session_start() {
 
   if sandbox_exists "$sandbox"; then
     info "Reusing sandbox '$sandbox'"
-    session_sync_kit "$main_root" "$sandbox" "$kit_dir" "$kit_hash"
+    session_sync_kit "$main_root" "$sandbox" "$kit_dir" "$kit_hash" "$worktree"
   else
     info "Creating sandbox '$sandbox'"
     sandbox_create \
@@ -70,26 +75,27 @@ session_start() {
   sandbox_attach "$sandbox"
 }
 
-# session_sync_kit <main-root> <sandbox> <kit-dir> <kit-hash>
+# session_sync_kit <main-root> <sandbox> <kit-dir> <kit-hash> <worktree>
 #
 # Bring an existing sandbox's Sandbox Kit up to date with the project's current
 # one (issue #7). Before this, editing .sbx/kit had no effect until the sandbox
 # was recreated by hand.
 #
-# A sandbox with no cache entry — one created by an older task-agent, or whose
-# entry was lost — has an unknown kit, so the kit is applied. Applying an
-# unchanged kit is wasteful but harmless; skipping a changed one is the bug this
-# exists to prevent.
+# Applying a kit means **recreating** the sandbox. There is no in-place update:
+# `sbx kit add` only appends to a sandbox's kit list, so handing it the project's
+# own kit again fails with "duplicate kit name", and its output shows it recreates
+# the sandbox anyway. tests/spike/sandbox-kit.bats pins both facts down against
+# the real CLI. So the kit is applied here with remove-then-create, which the
+# spike already covers, instead of an experimental command that cannot express
+# what is needed.
 #
-# Nothing here is allowed to stop the agent from starting: `sbx kit add` is
-# experimental, so a failure warns, prints the manual command, and continues. The
-# digest is deliberately *not* recorded in that case, so the next run tries
-# again instead of inheriting a false "already applied".
+# Because that is destructive to anything living only inside the container, it is
+# not silent: see session_kit_should_recreate.
 session_sync_kit() {
-  local main_root="$1" sandbox="$2" kit_dir="$3" kit_hash="$4"
+  local main_root="$1" sandbox="$2" kit_dir="$3" kit_hash="$4" worktree="$5"
 
   # No digest means no comparison is possible; leave the sandbox alone rather
-  # than re-applying the kit on every single start.
+  # than rebuilding it on every single start.
   [[ -n "$kit_hash" ]] || return 0
 
   local applied
@@ -99,22 +105,82 @@ session_sync_kit() {
     return 0
   fi
 
-  if [[ -n "$applied" ]]; then
-    info "The Sandbox Kit changed — applying it to '$sandbox'"
-  else
-    info "The kit applied to '$sandbox' is unknown — applying the current one"
-  fi
-
-  if sandbox_apply_kit "$sandbox" "$kit_dir"; then
+  # An untracked sandbox — created before task-agent tracked kits, or one whose
+  # record was lost — is adopted rather than rebuilt. Its kit is unknown, and
+  # destroying a sandbox nobody asked us to touch is a far worse outcome than
+  # missing at most one kit change, which is exactly what happened before
+  # issue #7 anyway.
+  if [[ -z "$applied" ]]; then
+    info "Recording the current Sandbox Kit for '$sandbox' (it was not tracked yet)"
     kit_cache_write "$main_root" "$sandbox" "$kit_hash" || true
-    success "Applied the current Sandbox Kit to '$sandbox'"
     return 0
   fi
 
-  warning "Could not apply the changed Sandbox Kit to '$sandbox'."
-  warning "'sbx kit add' is an experimental Docker Sandboxes feature; apply it yourself with:"
-  warning "  sbx kit add $sandbox $kit_dir"
-  warning "Starting the agent with the sandbox as it is."
+  session_kit_should_recreate "$sandbox" || return 0
+
+  info "Recreating sandbox '$sandbox' from the current Sandbox Kit"
+  sandbox_remove "$sandbox"
+  sandbox_create \
+    "$sandbox" \
+    "$kit_dir" \
+    "$worktree" \
+    "$(git_git_metadata_dir "$main_root")"
+
+  kit_cache_write "$main_root" "$sandbox" "$kit_hash" || true
+  success "Recreated '$sandbox' from the current Sandbox Kit"
+}
+
+# session_kit_should_recreate <sandbox> — 0 to recreate, non-zero to leave it be.
+#
+# Honours TASK_AGENT_KIT_RECREATE (ask | yes | no). In `ask` mode with no
+# terminal to ask at, the answer is no: recreating a sandbox unasked would throw
+# away container state the user may still want, and skipping it only leaves the
+# sandbox as it already was.
+session_kit_should_recreate() {
+  local sandbox="$1"
+
+  case "$TASK_AGENT_KIT_RECREATE" in
+    yes) return 0 ;;
+    no)
+      session_kit_kept "$sandbox" "TASK_AGENT_KIT_RECREATE=no."
+      return 1
+      ;;
+    ask) ;;
+    *)
+      die "Invalid TASK_AGENT_KIT_RECREATE: '$TASK_AGENT_KIT_RECREATE'" \
+        "Use one of: ask (the default), yes, no."
+      ;;
+  esac
+
+  warning "The Sandbox Kit changed since sandbox '$sandbox' was created."
+  warning "Applying it recreates that sandbox — Docker Sandboxes has no in-place"
+  warning "kit update — so anything that exists only inside the container is lost,"
+  warning "the agent's session state in there included."
+  warning "The worktree on the host, its files and its commits are not affected."
+
+  if [[ ! -t 0 ]]; then
+    session_kit_kept "$sandbox" "Not asking, because stdin is not a terminal."
+    warning "  Set TASK_AGENT_KIT_RECREATE=yes to recreate without being asked."
+    return 1
+  fi
+
+  if confirm "Recreate '$sandbox' from the current kit?"; then
+    return 0
+  fi
+
+  session_kit_kept "$sandbox" "Not recreating it."
+  return 1
+}
+
+# session_kit_kept <sandbox> <reason>
+#
+# Report that a changed kit was not applied. The digest is deliberately not
+# recorded, so the next run offers again rather than treating the old kit as
+# current.
+session_kit_kept() {
+  warning "$2 Sandbox '$1' keeps the kit it was created with."
+  warning "To apply the current kit later, rebuild the sandbox:"
+  warning "  task-agent --done <branch>   # then start the task again"
 }
 
 # session_done <branch>
