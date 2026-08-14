@@ -19,6 +19,7 @@ set -euo pipefail
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cat \
+  "$ROOT/lib/version.sh" \
   "$ROOT/lib/logging.sh" \
   "$ROOT/lib/naming.sh" \
   "$ROOT/lib/git.sh" \

@@ -52,16 +52,66 @@ cli() {
   cli --help
   assert_success
   local flag
-  for flag in --submit --sync --status --shell --plan --version --force --rebuild; do
+  for flag in --submit --sync --status --shell --plan --force --rebuild; do
     assert_output_not_contains "$flag"
   done
 }
 
-@test "help documents --done and --update" {
+@test "help documents --done, --update and --version" {
   cli --help
   assert_success
   assert_output_contains "--done"
   assert_output_contains "--update"
+  assert_output_contains "--version"
+}
+
+# --- version ----------------------------------------------------------------
+
+@test "--version prints the version from lib/version.sh on stdout" {
+  local declared
+  declared="$(bash -c "source '$AGENT_LIB/version.sh'; printf '%s' \"\$AGENT_TASK_VERSION\"")"
+
+  cli --version
+  assert_success
+  assert_equal "$output" "$declared"
+  # A version is data a script may want to read, so — unlike every log line —
+  # it must be on stdout and nothing else may join it there.
+  assert_equal "$stderr" ""
+}
+
+@test "the version looks like a version" {
+  cli --version
+  assert_success
+  [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "not a version: '$output'"
+}
+
+@test "--version works outside a git repository" {
+  # It reports a property of the install, not of any repository.
+  local outside="$TMP/not-a-repo"
+  mkdir -p "$outside"
+  run --separate-stderr bash -c "cd '$outside' && '$AGENT_TASK' --version"
+  assert_success
+}
+
+@test "--version with a branch name is rejected" {
+  cli --version feature/x
+  assert_failure
+  [[ "$stderr" == *"--version does not take a branch name"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--version with --base is rejected" {
+  cli --version --base develop
+  assert_failure
+  [[ "$stderr" == *"--base is not valid with --version"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--version and --update together are rejected" {
+  cli --version --update
+  assert_failure
+  [[ "$stderr" == *"Only one of --init, --done, --update, --version may be given"* ]] ||
+    fail "unexpected stderr: $stderr"
 }
 
 # --- no arguments -----------------------------------------------------------
@@ -136,7 +186,7 @@ cli() {
 @test "--done and --init together are rejected" {
   cli --done --init
   assert_failure
-  [[ "$stderr" == *"Only one of --init, --done, --update may be given"* ]] ||
+  [[ "$stderr" == *"Only one of --init, --done, --update, --version may be given"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 
@@ -157,7 +207,7 @@ cli() {
 @test "--update and --done together are rejected" {
   cli --update --done feature/x
   assert_failure
-  [[ "$stderr" == *"Only one of --init, --done, --update may be given"* ]] ||
+  [[ "$stderr" == *"Only one of --init, --done, --update, --version may be given"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 

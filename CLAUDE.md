@@ -8,9 +8,10 @@ Phase 1 is implemented: `agent-task --init` and `agent-task <branch> [--base <br
 Docker Sandboxes (`sbx`). The tool is **bash**, not Java — the `.idea/` directory is a leftover of the
 original scaffold and is not used by the build or the tests.
 
-`--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), which
-is why they are no longer in the Phase 1 exclusion list under "Scope discipline" below. Everything
-else in that list still applies.
+`--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), and
+`--version` by a further one (issue #6, which needed a version to compare), which is why none of them
+are in the Phase 1 exclusion list under "Scope discipline" below. Everything else in that list still
+applies.
 
 ## Intent
 
@@ -28,6 +29,7 @@ Two analysis documents in `docs/` explain where the design comes from:
 
 ```
 bin/agent-task       argument parsing, dispatch, help — no git or sbx logic
+lib/version.sh       AGENT_TASK_VERSION — the single source of truth for the version
 lib/logging.sh       info / success / warning / error / die  (everything to stderr)
 lib/naming.sh        pure naming functions: slug, short hash, worktree/sandbox/project ids
 lib/git.sh           repo checks, main-root resolution, branch validation/detection/creation
@@ -35,7 +37,7 @@ lib/worktree.sh      worktree path derivation, registered-worktree lookup, creat
 lib/sandbox.sh       sbx presence, existence check, argv construction, execution
 lib/scaffold.sh      `--init` only: create .sbx/kit and download spec.yaml atomically
 lib/session.sh       orchestration of `agent-task <branch>` and `agent-task --done <branch>`
-lib/selfupdate.sh    `--update` only: download and install the latest release in place
+lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
                          artifact `.github/workflows/release.yml` publishes; not runtime code
 tests/               bats suite (see below)
@@ -132,9 +134,10 @@ Conventions:
 ## Scope discipline
 
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
-(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below. Still not implemented, and
-not to be added without a further explicit decision: `--submit`, `--sync`, `--status`, `--shell`,
-`--plan`, `--version`, `--force`, `--rebuild`; pull requests and GitHub integration; branch deletion;
+(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — and `--version` by another
+one (issue #6). Still not implemented, and not to be added without a further explicit decision:
+`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--force`, `--rebuild`; pull requests and
+GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
 `docker run`; project configuration files; and any generic `runtime_*` abstraction (Docker Sandboxes is
 the only runtime, and a one-implementation interface is unverifiable).
@@ -171,6 +174,29 @@ the original bug report (issue #5): a bundle has no `source` lines to fail on in
 it can never hit the "`lib/*.sh`: No such file or directory" crash that a single file dropped next to
 a `--init`-only script could.
 
-`--update` always re-downloads; there is no version comparison and no embedded version marker in the
-bundle. Issue #3 did not ask for a "already up to date" short-circuit, so none was built — do not add
-one without a reason to.
+## How the version and `--update`'s version check work
+
+`lib/version.sh`'s `AGENT_TASK_VERSION` is the only place the version is written down, and
+`agent-task --version` prints it. It is a plain constant rather than something derived from git: the
+release bundle has no repository to ask, and asking git would make an installed bundle's version
+depend on whichever directory it was run from.
+
+`.github/workflows/release.yml` refuses to publish a tag that does not match `AGENT_TASK_VERSION`.
+That check is load-bearing, not hygiene — it is the only thing that makes a version comparison
+against the latest release mean anything. Bump the constant in the commit you tag.
+
+`selfupdate_latest_version` (`lib/selfupdate.sh`) resolves the latest released version from where
+`https://github.com/<repo>/releases/latest` **redirects** to (`…/releases/tag/vX.Y.Z`), read off
+`curl --head`'s `%{url_effective}`. Deliberately not the GitHub API: that would mean a JSON parser
+(`jq` is not a dependency and must not become one) and the unauthenticated rate limit. A repository
+with no releases redirects to `…/releases`, so the `v` prefix is required before a segment is
+believed to be a tag.
+
+Two decisions in `selfupdate_run` worth keeping:
+
+- The comparison is **"differs"**, not "is newer". There is no version ordering to get wrong, and a
+  deliberate rollback (a release republished at a lower version) still installs.
+- If the latest version **cannot be determined**, the download is attempted anyway, with a warning.
+  Refusing would turn any hiccup in the probe into a broken `--update`, whereas an unnecessary
+  download is merely wasteful — and an offline machine fails at the download with its own clear
+  message regardless. Do not "fix" this into a hard failure.

@@ -28,6 +28,7 @@ AGENT_SELF="$(agent_task_self)"
 AGENT_BIN_DIR="$(dirname "$AGENT_SELF")"
 AGENT_LIB_DIR="${AGENT_BIN_DIR%/bin}/lib"
 
+source "$AGENT_LIB_DIR/version.sh"
 source "$AGENT_LIB_DIR/logging.sh"
 source "$AGENT_LIB_DIR/naming.sh"
 source "$AGENT_LIB_DIR/git.sh"
@@ -46,6 +47,7 @@ Usage:
   agent-task <branch> [--base <branch>]
   agent-task --done <branch>
   agent-task --update
+  agent-task --version
 
 Commands:
   --init        Download the Docker Sandbox Kit into the current project.
@@ -53,9 +55,10 @@ Commands:
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
-  --update      Download and install the latest agent-task release. Only
-                works for a single-file install; a git checkout is updated
-                with 'git pull' instead.
+  --update      Install the latest agent-task release, unless it is already
+                installed. Only works for a single-file install; a git
+                checkout is updated with 'git pull' instead.
+  --version     Print the installed version.
 
 Options:
   --base        Base branch for a newly created branch. Default: main.
@@ -66,7 +69,7 @@ EOF
 
 main() {
   local branch="" base="$AGENT_DEFAULT_BASE_BRANCH"
-  local do_init=0 do_done=0 do_update=0 base_seen=0
+  local do_init=0 do_done=0 do_update=0 do_version=0 base_seen=0
 
   if (($# == 0)); then
     usage >&2
@@ -89,6 +92,10 @@ main() {
         ;;
       --update)
         do_update=1
+        shift
+        ;;
+      --version)
+        do_version=1
         shift
         ;;
       --base)
@@ -132,11 +139,28 @@ main() {
     esac
   done
 
-  local mode_count=$((do_init + do_done + do_update))
+  local mode_count=$((do_init + do_done + do_update + do_version))
   if ((mode_count > 1)); then
-    error "Only one of --init, --done, --update may be given."
+    error "Only one of --init, --done, --update, --version may be given."
     usage >&2
     exit 1
+  fi
+
+  if ((do_version)); then
+    if [[ -n "$branch" ]]; then
+      error "--version does not take a branch name (got: $branch)"
+      usage >&2
+      exit 1
+    fi
+    if ((base_seen)); then
+      error "--base is not valid with --version."
+      usage >&2
+      exit 1
+    fi
+    # The only thing agent-task ever writes to stdout: a version is data a
+    # script may want to read, unlike the progress reporting in lib/logging.sh.
+    printf '%s\n' "$AGENT_TASK_VERSION"
+    return
   fi
 
   if ((do_init)); then

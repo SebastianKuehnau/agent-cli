@@ -20,6 +20,19 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
+      # A release named vX.Y.Z must contain a bundle that reports X.Y.Z,
+      # otherwise `--update`'s "already the latest release" check compares
+      # against a version that was never published.
+      - name: Verify the tag matches the declared version
+        run: |
+          declared="$(bash -c 'source lib/version.sh; printf "%s" "$AGENT_TASK_VERSION"')"
+          if [[ "v$declared" != "$GITHUB_REF_NAME" ]]; then
+            printf 'Tag %s does not match lib/version.sh (v%s).\n' \
+              "$GITHUB_REF_NAME" "$declared" >&2
+            printf 'Bump AGENT_TASK_VERSION and re-tag.\n' >&2
+            exit 1
+          fi
+
       - name: Build the single-file bundle
         run: scripts/build-bundle.sh > agent-task
 

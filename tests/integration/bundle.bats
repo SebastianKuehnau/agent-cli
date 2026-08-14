@@ -72,8 +72,23 @@ setup() {
   [[ "$stderr" == *"was kept"* ]] || fail "unexpected stderr: $stderr"
 }
 
+@test "the bundle reports the same version as the checkout" {
+  run "$INSTALL_DIR/agent-task" --version
+  assert_success
+  local bundled="$output"
+
+  run "$AGENT_TASK" --version
+  assert_success
+
+  assert_equal "$bundled" "$output"
+}
+
 @test "--update on the bundle proceeds instead of refusing, since lib/ is absent" {
-  run --separate-stderr env AGENT_TASK_UPDATE_URL="file://$TMP/does-not-exist" \
+  # Both URLs are local: an unresolvable version probe warns and falls through
+  # to the download, which is the step under test here.
+  run --separate-stderr env \
+    AGENT_TASK_UPDATE_URL="file://$TMP/does-not-exist" \
+    AGENT_TASK_LATEST_URL="file://$TMP/no-such-release" \
     "$INSTALL_DIR/agent-task" --update
   assert_failure
   # It must fail on the download (no such fixture), not on the lib/ check.

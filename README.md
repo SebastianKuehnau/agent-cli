@@ -42,6 +42,7 @@ Usage:
   agent-task <branch> [--base <branch>]
   agent-task --done <branch>
   agent-task --update
+  agent-task --version
 
 Commands:
   --init        Download the Docker Sandbox Kit into the current project.
@@ -49,9 +50,10 @@ Commands:
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
-  --update      Download and install the latest agent-task release. Only
-                works for a single-file install; a git checkout is updated
-                with 'git pull' instead.
+  --update      Install the latest agent-task release, unless it is already
+                installed. Only works for a single-file install; a git
+                checkout is updated with 'git pull' instead.
+  --version     Print the installed version.
 
 Options:
   --base        Base branch for a newly created branch. Default: main.
@@ -149,9 +151,22 @@ work. Commit, stash, or remove those changes and run it again.
 agent-task --update
 ```
 
-Downloads and installs the latest release in place. This only works for a single-file install (see
-[Install](#install) above) — a git checkout has nothing for `--update` to replace, and is told to run
-`git pull` instead.
+Installs the latest release in place — but only if it is not already installed:
+
+```bash
+$ agent-task --version
+0.2.0
+$ agent-task --update
+[agent-task] agent-task 0.2.0 is already the latest release.
+```
+
+The installed version is the one printed by `agent-task --version`; the latest released version is
+read from where `…/releases/latest` redirects to, which needs no GitHub token and no API quota. If
+that check cannot be made at all, `agent-task` says so and downloads anyway, so a hiccup in the check
+can never leave you unable to update.
+
+This only works for a single-file install (see [Install](#install) above) — a git checkout has
+nothing for `--update` to replace, and is told to run `git pull` instead.
 
 ## Development
 
@@ -174,10 +189,15 @@ green `tests/run-tests.sh` on its own does not mean that assumption still holds.
 
 ### Releasing
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the single-file bundle with
-`scripts/build-bundle.sh` and publishes it as that release's `agent-task` asset — the exact file
-`agent-task --update` downloads. `bin/` and `lib/` remain the source of truth; the bundle is a
-release-time build artifact, not something committed to the repository.
+Bump `AGENT_TASK_VERSION` in `lib/version.sh` in the commit you are about to tag, then push the
+matching `v*` tag. That runs `.github/workflows/release.yml`, which refuses a tag that does not match
+the declared version, builds the single-file bundle with `scripts/build-bundle.sh`, and publishes it
+as that release's `agent-task` asset — the exact file `agent-task --update` downloads. `bin/` and
+`lib/` remain the source of truth; the bundle is a release-time build artifact, not something
+committed to the repository.
+
+The tag check is what makes `--update` trustworthy: a release named `vX.Y.Z` always contains a bundle
+that reports `X.Y.Z`, so "already the latest release" can never be a lie.
 
 See [CLAUDE.md](./CLAUDE.md) for the module layout, the architectural rules, and the testing
 conventions. Background reading lives in [`docs/`](./docs).
