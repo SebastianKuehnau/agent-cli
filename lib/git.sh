@@ -19,7 +19,7 @@ git_require_git() {
 git_require_repo() {
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
     die "Not inside a git repository." \
-      "Run agent-task from within a git repository."
+      "Run task-agent from within a git repository."
 }
 
 # git_main_repo_root

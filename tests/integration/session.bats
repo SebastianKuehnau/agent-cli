@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# End-to-end orchestration of `agent-task <branch>` over a real git repository
+# End-to-end orchestration of `task-agent <branch>` over a real git repository
 # and a fake `sbx`. This covers the create-then-reuse contract: running the same
 # command twice must reuse the branch, the worktree and the sandbox.
 
@@ -22,7 +22,7 @@ setup() {
 
 task() {
   run --separate-stderr bash -c \
-    "cd '$REPO' && '$AGENT_TASK' $(printf '%q ' "$@")"
+    "cd '$REPO' && '$TASK_AGENT' $(printf '%q ' "$@")"
 }
 
 expected_sandbox() {
@@ -175,6 +175,271 @@ arg:run"
   assert_equal "$(git -C "$REPO" rev-parse feature/x)" "$head_before"
 }
 
+# --- changed Sandbox Kit (issue #7) -----------------------------------------
+#
+# Applying a changed kit means recreating the sandbox: `sbx kit add` cannot
+# express "this kit changed" (see tests/spike/sandbox-kit.bats). Because that is
+# destructive to container-only state, the default is to ask — and bats runs with
+# no terminal on stdin, so the default here is "do not touch it", which is
+# exactly the non-interactive behaviour being asserted below.
+
+# kit_digest — the digest task-agent computes for the project's current kit.
+kit_digest() {
+  bash -c "source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/naming.sh'
+    source '$AGENT_LIB/scaffold.sh'
+    scaffold_kit_hash '$REPO'"
+}
+
+# recorded_digest <sandbox> — the digest recorded as applied to <sandbox>.
+recorded_digest() {
+  bash -c "source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/git.sh'
+    source '$AGENT_LIB/kit.sh'
+    kit_cache_read '$REPO' '$1'"
+}
+
+change_kit() {
+  printf 'schemaVersion: "2"\nkind: mixin\nname: changed\n' >"$REPO/.sbx/kit/spec.yaml"
+}
+
+# sbx_subcommands — the sbx subcommands invoked, in order, one per line.
+sbx_subcommands() {
+  grep -E '^arg:(create|rm|run|ls|kit)$' "$FAKE_SBX_DIR/calls.log" || true
+}
+
+@test "creating a sandbox records the kit it was created from" {
+  task feature/new-crud
+  assert_success
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$(kit_digest)"
+}
+
+@test "an unchanged kit leaves the sandbox alone on reuse" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  task feature/new-crud
+  assert_success
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:run"
+}
+
+@test "a changed kit is never applied behind sbx kit add" {
+  # The command it used to call cannot re-apply a kit of the same name, so it
+  # must not be called at all.
+  task feature/new-crud
+  assert_success
+  change_kit
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "0"
+}
+
+@test "a changed kit with no terminal to ask at is reported, not applied" {
+  task feature/new-crud
+  assert_success
+  local before
+  before="$(recorded_digest "$(expected_sandbox feature/new-crud)")"
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  change_kit
+  task feature/new-crud
+  assert_success
+
+  [[ "$stderr" == *"Sandbox Kit changed"* ]] || fail "change not reported: $stderr"
+  [[ "$stderr" == *"stdin is not a terminal"* ]] || fail "reason not given: $stderr"
+  [[ "$stderr" == *"TASK_AGENT_KIT_RECREATE=yes"* ]] || fail "no way out offered: $stderr"
+
+  # Nothing was rebuilt, and the agent still started.
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:run"
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$before"
+}
+
+@test "the destructive part is spelled out before anything happens" {
+  task feature/new-crud
+  assert_success
+  change_kit
+  task feature/new-crud
+  assert_success
+  [[ "$stderr" == *"only inside the container is lost"* ]] ||
+    fail "consequence not stated: $stderr"
+  [[ "$stderr" == *"session state"* ]] ||
+    fail "the loss that actually bites is not named: $stderr"
+  [[ "$stderr" == *"not affected"* ]] || fail "worktree safety not stated: $stderr"
+}
+
+@test "TASK_AGENT_KIT_RECREATE=yes recreates the sandbox from the changed kit" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  change_kit
+  export TASK_AGENT_KIT_RECREATE=yes
+  task feature/new-crud
+  unset TASK_AGENT_KIT_RECREATE
+  assert_success
+
+  # Removed, recreated, then attached to — in that order.
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:rm
+arg:create
+arg:run"
+  [[ "$stderr" == *"Recreated"* ]] || fail "recreation not reported: $stderr"
+}
+
+@test "the recreated sandbox keeps its name, kit, worktree and git metadata dir" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  change_kit
+  export TASK_AGENT_KIT_RECREATE=yes
+  task feature/new-crud
+  unset TASK_AGENT_KIT_RECREATE
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  run cat "$FAKE_SBX_DIR/calls.log"
+  assert_output_contains "arg:--name"
+  assert_output_contains "arg:$(expected_sandbox feature/new-crud)"
+  assert_output_contains "arg:--kit"
+  assert_output_contains "arg:$REPO/.sbx/kit"
+  assert_output_contains "arg:$wt"
+  assert_output_contains "arg:$REPO/.git"
+
+  # And exactly one sandbox of that name is left registered.
+  assert_equal "$(grep -cx "$(expected_sandbox feature/new-crud)" "$FAKE_SBX_DIR/sandboxes")" "1"
+}
+
+@test "recreating records the new digest, so the next run does nothing" {
+  task feature/new-crud
+  assert_success
+  change_kit
+  export TASK_AGENT_KIT_RECREATE=yes
+  task feature/new-crud
+  assert_success
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$(kit_digest)"
+
+  : >"$FAKE_SBX_DIR/calls.log"
+  task feature/new-crud
+  unset TASK_AGENT_KIT_RECREATE
+  assert_success
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:run"
+}
+
+@test "a kit change that was skipped is offered again on the next run" {
+  # Not recording the digest on the skip path is what makes this work.
+  task feature/new-crud
+  assert_success
+  change_kit
+  task feature/new-crud
+  assert_success
+
+  : >"$FAKE_SBX_DIR/calls.log"
+  export TASK_AGENT_KIT_RECREATE=yes
+  task feature/new-crud
+  unset TASK_AGENT_KIT_RECREATE
+  assert_success
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:rm
+arg:create
+arg:run"
+}
+
+@test "TASK_AGENT_KIT_RECREATE=no keeps the sandbox and says why" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  change_kit
+  export TASK_AGENT_KIT_RECREATE=no
+  task feature/new-crud
+  unset TASK_AGENT_KIT_RECREATE
+  assert_success
+
+  [[ "$stderr" == *"TASK_AGENT_KIT_RECREATE=no"* ]] || fail "unexpected stderr: $stderr"
+  [[ "$stderr" == *"--done"* ]] || fail "no manual route offered: $stderr"
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:run"
+}
+
+@test "an invalid TASK_AGENT_KIT_RECREATE fails instead of guessing" {
+  # Guessing "no" for a typo would silently stop applying kit changes.
+  task feature/new-crud
+  assert_success
+
+  change_kit
+  export TASK_AGENT_KIT_RECREATE=maybe
+  task feature/new-crud
+  unset TASK_AGENT_KIT_RECREATE
+  assert_failure
+  [[ "$stderr" == *"Invalid TASK_AGENT_KIT_RECREATE"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "a sandbox whose kit was never tracked is adopted, not rebuilt" {
+  # The state a sandbox from an older task-agent is in. Destroying it unasked
+  # would be a nasty surprise on upgrade.
+  task feature/new-crud
+  assert_success
+  rm -rf "$REPO/.git/agent-cli"
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  task feature/new-crud
+  assert_success
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:run"
+  [[ "$stderr" == *"not tracked yet"* ]] || fail "unexpected stderr: $stderr"
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$(kit_digest)"
+}
+
+@test "an adopted sandbox picks up the next kit change normally" {
+  task feature/new-crud
+  assert_success
+  rm -rf "$REPO/.git/agent-cli"
+  task feature/new-crud
+  assert_success
+
+  change_kit
+  : >"$FAKE_SBX_DIR/calls.log"
+  export TASK_AGENT_KIT_RECREATE=yes
+  task feature/new-crud
+  unset TASK_AGENT_KIT_RECREATE
+  assert_success
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:rm
+arg:create
+arg:run"
+}
+
+@test "each sandbox tracks its own kit" {
+  task feature/one
+  assert_success
+  change_kit
+  task feature/two
+  assert_success
+
+  # feature/two was created from the changed kit; feature/one predates it.
+  : >"$FAKE_SBX_DIR/calls.log"
+  export TASK_AGENT_KIT_RECREATE=yes
+  task feature/two
+  assert_success
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:run"
+
+  : >"$FAKE_SBX_DIR/calls.log"
+  task feature/one
+  unset TASK_AGENT_KIT_RECREATE
+  assert_success
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:rm
+arg:create
+arg:run"
+}
+
 # --- naming -----------------------------------------------------------------
 
 @test "the sandbox name is deterministic across runs" {
@@ -208,7 +473,7 @@ arg:run"
 @test "running from a subdirectory works" {
   mkdir -p "$REPO/src/main/java"
   run --separate-stderr bash -c \
-    "cd '$REPO/src/main/java' && '$AGENT_TASK' feature/new-crud"
+    "cd '$REPO/src/main/java' && '$TASK_AGENT' feature/new-crud"
   assert_success
 
   local wt
@@ -222,7 +487,7 @@ arg:run"
   local wt
   wt="$(expected_worktree feature/new-crud)"
 
-  run --separate-stderr bash -c "cd '$wt' && '$AGENT_TASK' feature/new-crud"
+  run --separate-stderr bash -c "cd '$wt' && '$TASK_AGENT' feature/new-crud"
   assert_success
   [[ "$stderr" == *"Reusing sandbox"* ]] || fail "sandbox not reused: $stderr"
   assert_equal "$(grep -c '^arg:create$' "$FAKE_SBX_DIR/calls.log")" "1"
@@ -249,7 +514,7 @@ arg:run"
   printf 'schemaVersion: "2"\n' >"$spacey/.sbx/kit/spec.yaml"
 
   run --separate-stderr bash -c \
-    "cd '$spacey' && '$AGENT_TASK' feature/new-crud"
+    "cd '$spacey' && '$TASK_AGENT' feature/new-crud"
   assert_success
 
   # The worktree path with spaces reached sbx as a single argument.
@@ -270,7 +535,7 @@ arg:run"
   ln -s "$REPO" "$TMP/link-to-repo"
 
   run --separate-stderr bash -c \
-    "cd '$TMP/link-to-repo' && '$AGENT_TASK' feature/new-crud"
+    "cd '$TMP/link-to-repo' && '$TASK_AGENT' feature/new-crud"
   assert_success
 
   local wt
@@ -335,19 +600,18 @@ arg:run"
 
 @test "a sandbox creation failure is reported and not silently ignored" {
   run --separate-stderr env FAKE_SBX_EXIT=1 bash -c \
-    "cd '$REPO' && '$AGENT_TASK' feature/new-crud"
+    "cd '$REPO' && '$TASK_AGENT' feature/new-crud"
   assert_failure
   [[ "$stderr" == *"Failed to create the sandbox"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 
-# --- no persisted state -----------------------------------------------------
+# --- no persisted state beyond the kit cache --------------------------------
 
 @test "no agent-cli session state is written anywhere" {
   task feature/new-crud
   assert_success
 
-  assert_file_not_exists "$REPO/.git/agent-cli"
   assert_file_not_exists "$REPO/.agent"
   assert_file_not_exists "$REPO/.agent-cli"
 
@@ -355,4 +619,31 @@ arg:run"
   wt="$(expected_worktree feature/new-crud)"
   assert_file_not_exists "$wt/.agent"
   assert_file_not_exists "$wt/.agent-cli"
+}
+
+@test "the applied-kit cache is the only thing agent-cli persists" {
+  task feature/new-crud
+  assert_success
+
+  # Everything under .git/agent-cli must be the kit cache and nothing else, so
+  # that "no persisted session state" stays true apart from the one documented
+  # exception (issue #7).
+  run find "$REPO/.git/agent-cli" -mindepth 1 -maxdepth 1
+  assert_success
+  assert_equal "$output" "$REPO/.git/agent-cli/kit"
+}
+
+@test "the sandbox and worktree are still discovered with the cache deleted" {
+  # The cache is a cache: removing it may cost a kit re-application, but must
+  # not change what task-agent concludes exists.
+  task feature/new-crud
+  assert_success
+  rm -rf "$REPO/.git/agent-cli"
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  task feature/new-crud
+  assert_success
+  [[ "$stderr" == *"Reusing existing branch"* ]] || fail "branch not reused: $stderr"
+  [[ "$stderr" == *"Reusing sandbox"* ]] || fail "sandbox not reused: $stderr"
+  assert_equal "$(grep -c '^arg:create$' "$FAKE_SBX_DIR/calls.log")" "0"
 }

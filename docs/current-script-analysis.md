@@ -114,7 +114,7 @@ Status is `OPEN` for every row: no keep/change/remove/move decision has been mad
 | F05 | Tear down a task | `--done` | worktree + container | OPEN |
 | F06 | Scaffold per-project config | `--init` | config (+ new `scaffold`) | OPEN |
 | F07 | Self-update | `--update` | new `selfupdate` | OPEN |
-| F08 | Help, usage and dispatch | `--help`, no args | `bin/agent-task` | OPEN |
+| F08 | Help, usage and dispatch | `--help`, no args | `bin/task-agent` | OPEN |
 | F09 | Force image rebuild | `--rebuild` | container | OPEN |
 | F10 | `--force` modifier (dual meaning) | `--init`, `--done` | config / worktree | OPEN |
 | F11 | Git-repo precondition check | all commands | git | OPEN |
@@ -170,8 +170,8 @@ Status is `OPEN` for every row: no keep/change/remove/move decision has been mad
 | F61 | Latest release-tag resolution | `--update` | new `selfupdate` | OPEN |
 | F62 | Download, install, version report | `--update` | new `selfupdate` | OPEN |
 | F63 | Logging primitives | everywhere | logging | OPEN |
-| F64 | Per-command argument parsing | everywhere | `bin/agent-task` | OPEN |
-| F65 | Version constant (no `--version`) | — | `bin/agent-task` | OPEN |
+| F64 | Per-command argument parsing | everywhere | `bin/task-agent` | OPEN |
+| F65 | Version constant (no `--version`) | — | `bin/task-agent` | OPEN |
 
 **Existing tests: none, for all 65 entries.** This is stated once here rather than repeated in every
 block. See [Testing analysis](#testing-analysis).
@@ -273,7 +273,7 @@ block. See [Testing analysis](#testing-analysis).
 - **Open questions:** OPEN — should the base branch be configurable/detected? OPEN — must the pipeline run
   *inside* the container at all, given it needs the container only for the build toolchain? OPEN — should
   rebase-vs-merge be a policy choice? OPEN — should the pipeline be decomposed into individually
-  invocable steps (`agent-task rebase`, `agent-task test`, `agent-task pr`)?
+  invocable steps (`task-agent rebase`, `task-agent test`, `task-agent pr`)?
 
 #### F05 — Tear down a task
 
@@ -349,10 +349,10 @@ block. See [Testing analysis](#testing-analysis).
 - **Side effects:** none.
 - **Failure cases:** no args → exit 1 (arguably wrong for a bare invocation); unknown flag → exit 1;
   a branch literally named like a flag is unreachable.
-- **Proposed module:** `bin/agent-task`.
+- **Proposed module:** `bin/task-agent`.
 - **Testability:** trivially unit-testable (argv → chosen handler + exit code), *if* the handler is
   resolved as data rather than by immediately calling it.
-- **Open questions:** OPEN — subcommands (`agent-task start|shell|sync|done|init`) instead of flag-modes?
+- **Open questions:** OPEN — subcommands (`task-agent start|shell|sync|done|init`) instead of flag-modes?
   This is the single biggest CLI-shape decision and it affects F01–F10 and F64.
 
 #### F09 — Force image rebuild (`--rebuild`)
@@ -379,7 +379,7 @@ block. See [Testing analysis](#testing-analysis).
   `--done --force` permits destroying uncommitted and unpushed work.
 - **Failure cases:** the overloading is a UX hazard — the same word means "overwrite my files" and
   "destroy my unpushed commits".
-- **Proposed module:** parsing in `bin/agent-task`; semantics in `config.sh` / `worktree.sh`.
+- **Proposed module:** parsing in `bin/task-agent`; semantics in `config.sh` / `worktree.sh`.
 - **Testability:** unit-testable per command.
 - **Open questions:** OPEN — split into distinct, self-describing flags?
 
@@ -804,7 +804,7 @@ selection; the exec-bit repair for wrappers lives in the image entrypoint, not h
 **Module:** a new `build.sh` (knowledge of build systems) invoked by `pull-request.sh`.
 **Testability:** the tool→command mapping is a pure unit test; execution is an integration test.
 **Open:** OPEN — replace the enum with a configurable `testCommand`? OPEN — is running tests part of "sync" at
-all, or a separate `agent-task test`?
+all, or a separate `task-agent test`?
 
 #### F44 — Task-spec stripping commit
 
@@ -1046,7 +1046,7 @@ Four near-duplicate `while`/`case` loops (`cmd_start :381-388`, `cmd_done :454-4
 `cmd_init :941-946`).
 **Failure:** duplicated logic drifting per command; extra positionals silently dropped (last wins); no
 `--` separator; no validation of branch names at all (which enables [D-06](#verified-defects-and-risks)).
-**Module:** `bin/agent-task` (shared parser). **Testability:** **pure argv → parsed-options — excellent unit
+**Module:** `bin/task-agent` (shared parser). **Testability:** **pure argv → parsed-options — excellent unit
 test target** once extracted.
 **Open:** OPEN — subcommands vs flag-modes (F08)? OPEN — add branch-name validation?
 
@@ -1054,7 +1054,7 @@ test target** once extracted.
 
 `CLAUDE_TASK_VERSION="0.2.1"` (`:20`), used only by `cmd_update`'s comparison and its own sanity check.
 **Failure:** no `--version` flag; no changelog or versioning policy exists upstream [docs].
-**Module:** `bin/agent-task`. **Testability:** trivial.
+**Module:** `bin/task-agent`. **Testability:** trivial.
 **Open:** OPEN — add `--version`; define a versioning and compatibility policy.
 
 ---
@@ -1096,7 +1096,7 @@ Two responsibilities the target structure does not yet name: **build/test execut
 | 1 | `info` | 35 | logging | `logging.sh` | |
 | 2 | `err` | 36 | logging | `logging.sh` | |
 | 3 | `die` | 37 | logging + control flow | `logging.sh` | |
-| 4 | `usage` | 39 | CLI help | `bin/agent-task` | |
+| 4 | `usage` | 39 | CLI help | `bin/task-agent` | |
 | 5 | `require_git_repo` | 67 | git validation | `git.sh` | |
 | 6 | `resolve_main_repo_root` | 77 | git identity | `git.sh` | |
 | 7 | `sanitize` | 91 | naming | `container.sh` / `naming.sh` | |
@@ -1136,7 +1136,7 @@ Two responsibilities the target structure does not yet name: **build/test execut
 | 41 | `cmd_init` | 939 | **CLI + questionnaire + 9 writers + gitignore + git add** | `scaffold.sh` (orchestrator) | **yes** |
 | 42 | `resolve_latest_tag` | 1063 | release lookup | `selfupdate.sh` | |
 | 43 | `cmd_update` | 1068 | download + install | `selfupdate.sh` | |
-| — | `main` | 1108 | dispatch | `bin/agent-task` | |
+| — | `main` | 1108 | dispatch | `bin/task-agent` | |
 
 ### Mixed-responsibility functions, spelled out
 
@@ -1155,7 +1155,7 @@ Contains:
 - agent launch-command selection (F39)
 - process replacement (exec)
 Potential future split:
-- bin/agent-task   (parsing)
+- bin/task-agent   (parsing)
 - git.sh           (repo/root)
 - worktree.sh      (find-or-create)
 - config.sh        (name, firewall, permission mode, cache path)
@@ -1175,7 +1175,7 @@ Contains:
 - an interpolated in-container pipeline: fetch, rebase, test, strip tasks/, push, PR (F42-F46)
 - exit-code mapping (F47)
 Potential future split:
-- bin/agent-task    (parsing)
+- bin/task-agent    (parsing)
 - git.sh            (fetch/rebase/push/upstream)
 - build.sh          (build-tool → test command)
 - pull-request.sh   (PR detect/create, orchestration, exit contract)
@@ -1209,7 +1209,7 @@ Contains:
 - .gitignore management (F59)
 - git staging + user-facing summary (F60)
 Potential future split:
-- bin/agent-task  (parsing)
+- bin/task-agent  (parsing)
 - scaffold.sh     (questionnaire + templates)
 - config.sh       (config writer)
 - git.sh          (staging)
@@ -1239,7 +1239,7 @@ yet name.**
 
 ```
 bin/
-  agent-task        F08, F64, F65 — dispatch, shared arg parsing, usage, version
+  task-agent        F08, F64, F65 — dispatch, shared arg parsing, usage, version
 lib/
   config.sh         F14, F21-F25, F31, F35, F50, F53, F59
   git.sh            F11, F12, F19(branch part), F42, F45, F48, F60
@@ -1373,7 +1373,7 @@ Everything is recomputed on every invocation. Concretely, the state of a "task" 
 
 Consequences worth an explicit decision:
 
-- **Derived state is self-healing but unqueryable.** There is no `agent-task list`, no way to see which
+- **Derived state is self-healing but unqueryable.** There is no `task-agent list`, no way to see which
   tasks exist, which are running, or which are stale.
 - **Identity is recomputed, so it can drift.** Renaming the project orphans a running container with no
   recovery path [docs].
@@ -1827,7 +1827,7 @@ Consolidated. Ordered so that earlier answers constrain later ones.
    of `session.sh` is new code.
 
 ### CLI and UX
-6. Subcommands (`agent-task start|shell|sync|done|init`) or flag-modes (F08, F64)?
+6. Subcommands (`task-agent start|shell|sync|done|init`) or flag-modes (F08, F64)?
 7. Split the overloaded `--force` (F10)?
 8. Add `--version` (F65), `--dry-run` (F30), `--json` (F63), and a documented exit-code contract (F47, F63)?
 9. Is there a `list` / `status` command? Nothing today can enumerate tasks

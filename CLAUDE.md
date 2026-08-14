@@ -4,13 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Phase 1 is implemented: `agent-task --init` and `agent-task <branch> [--base <branch>]`, backed by
+Phase 1 is implemented: `task-agent --init` and `task-agent <branch> [--base <branch>]`, backed by
 Docker Sandboxes (`sbx`). The tool is **bash**, not Java — the `.idea/` directory is a leftover of the
 original scaffold and is not used by the build or the tests.
 
-`--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), which
-is why they are no longer in the Phase 1 exclusion list under "Scope discipline" below. Everything
-else in that list still applies.
+`--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), and
+`--version` by a further one (issue #6, which needed a version to compare), which is why none of them
+are in the Phase 1 exclusion list under "Scope discipline" below. Everything else in that list still
+applies.
+
+The command was renamed from `agent-task` to `task-agent` in v0.2.0 (issue #8). The rename covers the
+executable, the `TASK_AGENT_*` environment overrides, the `[task-agent]` log prefix and the release
+asset. It deliberately stops there: the repository is still `agent-cli`, the internal `AGENT_*`
+variable prefix still refers to agent-cli rather than to the command, and — load-bearing — the
+`agent-` sandbox prefix and every derived worktree path are **unchanged**, so tasks started before the
+rename are still found afterwards. Do not "finish" the rename into those.
 
 ## Intent
 
@@ -27,29 +35,43 @@ Two analysis documents in `docs/` explain where the design comes from:
 ## Layout
 
 ```
-bin/agent-task       argument parsing, dispatch, help — no git or sbx logic
+bin/task-agent       argument parsing, dispatch, help — no git or sbx logic
+lib/version.sh       TASK_AGENT_VERSION — the single source of truth for the version
 lib/logging.sh       info / success / warning / error / die  (everything to stderr)
 lib/naming.sh        pure naming functions: slug, short hash, worktree/sandbox/project ids
 lib/git.sh           repo checks, main-root resolution, branch validation/detection/creation
 lib/worktree.sh      worktree path derivation, registered-worktree lookup, create-or-reuse/remove
 lib/sandbox.sh       sbx presence, existence check, argv construction, execution
-lib/scaffold.sh      `--init` only: create .sbx/kit and download spec.yaml atomically
-lib/session.sh       orchestration of `agent-task <branch>` and `agent-task --done <branch>`
-lib/selfupdate.sh    `--update` only: download and install the latest release in place
+lib/scaffold.sh      `--init` and the kit digest: create .sbx/kit, download spec.yaml atomically
+lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a cache, not state)
+lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
+lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
                          artifact `.github/workflows/release.yml` publishes; not runtime code
 tests/               bats suite (see below)
 ```
 
-`bin/agent-task` resolves its own directory through symlinks, so a symlinked install works.
+`bin/task-agent` resolves its own directory through symlinks, so a symlinked install works.
 
 ## Architectural rules
 
 These are load-bearing. Breaking one of them breaks the tool's core guarantees.
 
-1. **No persisted session state.** There is no state file, database or lockfile anywhere. Everything
-   is rediscovered per invocation from `git worktree list --porcelain` and `sbx ls -q`. Do not add
-   `.git/agent-cli/`, `~/.agent-cli/sessions/` or equivalent.
+1. **No persisted session state, with one bounded exception.** What exists is rediscovered per
+   invocation from `git worktree list --porcelain` and `sbx ls -q` — never read back from a file
+   agent-cli wrote earlier. Do not add a session registry, a database, a lockfile,
+   `~/.agent-cli/sessions/` or equivalent.
+
+   The one exception, added by explicit decision for issue #7, is the applied-Sandbox-Kit cache in
+   `lib/kit.sh` at `<main-repo>/.git/agent-cli/kit/<sandbox>`. It exists because Docker Sandboxes
+   offers no way to ask a sandbox which kit it currently has. It is permitted only as a **cache**,
+   and that is what bounds the exception:
+
+   - It may never be consulted to decide whether a branch, a worktree or a sandbox exists.
+   - Losing, deleting or corrupting it may only cause the kit to be applied once more than
+     necessary — never a wrong conclusion, never a failed start.
+
+   Any new persisted data must meet the same two conditions, or it is not allowed.
 2. **Identifiers are `<slug>-<hash>`, and the hash comes from the raw branch name.** This is what
    keeps `feature/foo`, `feature-foo` and `Feature/Foo` apart. Never use a bare sanitised branch name
    as a path or a sandbox name.
@@ -105,9 +127,9 @@ tests/run-tests.sh integration
 tests/run-tests.sh spike               # real Docker Sandboxes; auto-skips without sbx
 tests/run-tests.sh all
 
-AGENT_TASK_NETWORK_TESTS=1 tests/run-tests.sh unit   # also hits the real kit URL
+TASK_AGENT_NETWORK_TESTS=1 tests/run-tests.sh unit   # also hits the real kit URL
 
-shellcheck -x -s bash bin/agent-task lib/*.sh
+shellcheck -x -s bash bin/task-agent lib/*.sh
 ```
 
 Conventions:
@@ -132,9 +154,10 @@ Conventions:
 ## Scope discipline
 
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
-(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below. Still not implemented, and
-not to be added without a further explicit decision: `--submit`, `--sync`, `--status`, `--shell`,
-`--plan`, `--version`, `--force`, `--rebuild`; pull requests and GitHub integration; branch deletion;
+(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — and `--version` by another
+one (issue #6). Still not implemented, and not to be added without a further explicit decision:
+`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--force`, `--rebuild`; pull requests and
+GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
 `docker run`; project configuration files; and any generic `runtime_*` abstraction (Docker Sandboxes is
 the only runtime, and a one-implementation interface is unverifiable).
@@ -155,14 +178,16 @@ a user who wants to override git's own refusal can already do so directly with
 
 ## How `--update` and the release bundle fit together
 
-`bin/agent-task` + `lib/*.sh` is the only source layout and stays that way — it is what makes every
+`bin/task-agent` + `lib/*.sh` is the only source layout and stays that way — it is what makes every
 module unit-testable. `scripts/build-bundle.sh` is a release-time build step, not a second
-implementation: it concatenates the lib files and `bin/agent-task` (minus its `source
+implementation: it concatenates the lib files and `bin/task-agent` (minus its `source
 "$AGENT_LIB_DIR/..."` lines) into one self-contained file with no text surgery beyond dropping those
 lines. `.github/workflows/release.yml` runs it on every `v*` tag push and publishes the result as
-that release's `agent-task` asset.
+that release's `task-agent` asset — plus an identical copy named `agent-task`, because installs from
+before the rename look for that asset name and would otherwise get a 404 from `--update` instead of
+the release that renames the tool. Keep publishing both.
 
-`cmd_update` (`bin/agent-task`) tells the two supported install shapes apart by checking whether
+`cmd_update` (`bin/task-agent`) tells the two supported install shapes apart by checking whether
 `$AGENT_LIB_DIR` exists: if it does, this is a git checkout (or a symlink into one) and `--update` has
 nothing of its own to replace, so it refuses with a `git pull` hint; if it does not, this is a
 single-file bundle install and `--update` downloads the latest release over it in place
@@ -171,6 +196,94 @@ the original bug report (issue #5): a bundle has no `source` lines to fail on in
 it can never hit the "`lib/*.sh`: No such file or directory" crash that a single file dropped next to
 a `--init`-only script could.
 
-`--update` always re-downloads; there is no version comparison and no embedded version marker in the
-bundle. Issue #3 did not ask for a "already up to date" short-circuit, so none was built — do not add
-one without a reason to.
+## How a changed Sandbox Kit reaches an existing sandbox
+
+`.sbx/kit` is read by `sbx create`. Before issue #7, editing it afterwards had no effect until the
+sandbox was recreated by hand. Now `session_start` compares the kit against the one the sandbox was
+built from and offers to rebuild it when they differ.
+
+**Applying a kit means recreating the sandbox, and `sbx kit add` is not usable for this.** That was
+established by running `tests/spike/sandbox-kit.bats` against a real sbx, and it is the reason the
+implementation looks the way it does:
+
+- `sbx kit add <name> <kit-dir>` recreates the sandbox "with the new kit **appended to its original
+  kit list**" (its own `--help`). Handing it the project's own, already-applied kit therefore fails
+  with `compose: duplicate kit name "<name>"`. The kit's name identifies the project's kit and does not
+  change when its contents do, so this is the normal case, not an edge case — `sbx kit add` cannot
+  express "this kit changed".
+- There is nothing else to reach for: `sbx kit` offers `add`, `inspect`, `pack`, `pull`, `push` and
+  `validate`. No replace, no remove.
+- Applying a kit recreates the sandbox regardless. So `sandbox_remove` + `sandbox_create` is not a
+  workaround; it is the same operation via commands the spike verifies.
+
+One real trade-off comes with that. `sbx kit add`'s swap preserves kit-owned volumes — explicitly
+including agent session state — whereas `sbx rm` does not, so recreating loses the agent's session
+inside that sandbox. Getting the preserving behaviour would mean rewriting the kit's `name` per
+version so it appends as a *new* kit, which means YAML surgery without a parser and a kit list that
+grows forever, with the old kit's settings still composed in — i.e. "add a mixin", not "apply the
+current kit". That is why the loss is accepted and the user is asked instead.
+
+Do not reintroduce a `sbx kit add` call path without re-running that spike first. Note it also refuses
+sandboxes created before its recreate feature shipped, so it could never have been depended on
+unconditionally.
+
+Three pieces, deliberately separate:
+
+- `scaffold_kit_hash` (`lib/scaffold.sh`) digests the **whole** `.sbx/kit` directory — every file's
+  path, executable bit and content, in `LC_ALL=C` order. Paths are in the digest so a pure rename
+  counts as a change; the digest is independent of where the checkout lives, so moving a repository
+  does not look like a kit change.
+- `lib/kit.sh` remembers the digest a sandbox was built from, per sandbox. See architectural rule 1
+  for the invariant that keeps this a cache rather than session state.
+- `session_sync_kit` and `session_kit_should_recreate` (`lib/session.sh`) decide and act.
+
+Because recreating destroys anything living only inside the container, it is never silent. The default
+is to ask (`confirm` in `lib/logging.sh`), and `TASK_AGENT_KIT_RECREATE` overrides that with `yes` or
+`no`. Three rules hold that together:
+
+1. **No terminal means no.** In `ask` mode with a non-TTY stdin (a script, CI), `task-agent` reports
+   the change and leaves the sandbox alone. Consent cannot be inferred from silence, and a piped
+   "yes" is not a terminal either — `TASK_AGENT_KIT_RECREATE=yes` is the supported way to say yes
+   non-interactively.
+2. **A skip is never recorded.** Declining, `no`, and the non-TTY path all leave the digest untouched,
+   so the next run offers again rather than treating the old kit as current.
+3. **An invalid `TASK_AGENT_KIT_RECREATE` fails.** Treating a typo as `no` would silently switch kit
+   updates off.
+
+A sandbox with **no** cache entry — created by an older task-agent, or whose entry was lost — is
+*adopted*: the current digest is recorded and nothing is rebuilt. Rebuilding would destroy a sandbox
+nobody asked us to touch (every existing sandbox, on the first run after upgrading), and the cost of
+adopting is missing at most one kit change — exactly the pre-issue-#7 behaviour. Do not "improve" this
+into a rebuild. `--done` drops the entry, otherwise it would later claim that a freshly created
+sandbox of the same name already has that kit.
+
+`tests/spike/sandbox-kit.bats` is the only place the real CLI contract is exercised, and it skips
+itself when sbx is unavailable. A green `tests/run-tests.sh` therefore says nothing about whether
+Docker Sandboxes still behaves as described above.
+
+## How the version and `--update`'s version check work
+
+`lib/version.sh`'s `TASK_AGENT_VERSION` is the only place the version is written down, and
+`task-agent --version` prints it. It is a plain constant rather than something derived from git: the
+release bundle has no repository to ask, and asking git would make an installed bundle's version
+depend on whichever directory it was run from.
+
+`.github/workflows/release.yml` refuses to publish a tag that does not match `TASK_AGENT_VERSION`.
+That check is load-bearing, not hygiene — it is the only thing that makes a version comparison
+against the latest release mean anything. Bump the constant in the commit you tag.
+
+`selfupdate_latest_version` (`lib/selfupdate.sh`) resolves the latest released version from where
+`https://github.com/<repo>/releases/latest` **redirects** to (`…/releases/tag/vX.Y.Z`), read off
+`curl --head`'s `%{url_effective}`. Deliberately not the GitHub API: that would mean a JSON parser
+(`jq` is not a dependency and must not become one) and the unauthenticated rate limit. A repository
+with no releases redirects to `…/releases`, so the `v` prefix is required before a segment is
+believed to be a tag.
+
+Two decisions in `selfupdate_run` worth keeping:
+
+- The comparison is **"differs"**, not "is newer". There is no version ordering to get wrong, and a
+  deliberate rollback (a release republished at a lower version) still installs.
+- If the latest version **cannot be determined**, the download is attempted anyway, with a warning.
+  Refusing would turn any hiccup in the probe into a broken `--update`, whereas an unnecessary
+  download is merely wasteful — and an offline machine fails at the download with its own clear
+  message regardless. Do not "fix" this into a hard failure.

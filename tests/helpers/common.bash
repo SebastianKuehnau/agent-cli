@@ -7,7 +7,7 @@
 # Repository under test.
 AGENT_REPO_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export AGENT_REPO_ROOT
-export AGENT_TASK="$AGENT_REPO_ROOT/bin/agent-task"
+export TASK_AGENT="$AGENT_REPO_ROOT/bin/task-agent"
 export AGENT_LIB="$AGENT_REPO_ROOT/lib"
 
 # ---------------------------------------------------------------------------
@@ -200,6 +200,12 @@ case "$1" in
       mv "${FAKE_SBX_DIR}/sandboxes.tmp" "${FAKE_SBX_DIR}/sandboxes"
     fi
     ;;
+  kit)
+    # task-agent does not use `sbx kit` (see tests/spike/sandbox-kit.bats), so
+    # this branch exists only so that a regression calling it is visible in the
+    # log rather than silently succeeding as an unknown subcommand.
+    exit "${FAKE_SBX_KIT_EXIT:-${FAKE_SBX_EXIT:-0}}"
+    ;;
   run) : ;;
 esac
 exit "${FAKE_SBX_EXIT:-0}"
@@ -223,4 +229,12 @@ fake_sbx_calls() {
 # fake_sbx_call_count
 fake_sbx_call_count() {
   grep -c '^=== call$' "$FAKE_SBX_DIR/calls.log" || true
+}
+
+# fake_sbx_kit_call_count — recorded `sbx kit ...` invocations.
+#
+# Matches the whole line, so a kit *directory* among the arguments cannot be
+# mistaken for the `kit` subcommand.
+fake_sbx_kit_call_count() {
+  grep -cx 'arg:kit' "$FAKE_SBX_DIR/calls.log" || true
 }

@@ -8,7 +8,7 @@
 #   tests/run-tests.sh all             everything, spike included
 #
 # Environment:
-#   AGENT_TASK_NETWORK_TESTS=1   also run the opt-in test against the real
+#   TASK_AGENT_NETWORK_TESTS=1   also run the opt-in test against the real
 #                                Sandbox Kit URL on GitHub.
 
 set -euo pipefail
@@ -24,7 +24,7 @@ Install it with one of:
   brew install bats-core
   npm install -g bats
 
-bats is a development dependency only: bin/agent-task itself needs nothing
+bats is a development dependency only: bin/task-agent itself needs nothing
 beyond bash, git, curl and sbx.
 EOF
   exit 1
