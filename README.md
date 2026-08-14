@@ -78,23 +78,29 @@ An existing `.sbx/kit/spec.yaml` is never overwritten.
 
 ### Updating the Sandbox Kit
 
-`.sbx/kit/spec.yaml` is read when a sandbox is **created**. Editing it afterwards has no effect on a
-sandbox that already exists — `agent-task` reuses that sandbox unchanged, kit edits or not.
+Edit `.sbx/kit` whenever your project's toolchain or network policy changes, then just run
+`agent-task <branch>` again. It notices and applies the change:
 
-To apply a changed kit to an existing sandbox today, run this yourself:
+```text
+New sandbox:      agent-task uses .sbx/kit when creating it.
+Existing sandbox: agent-task compares .sbx/kit against the kit that sandbox already has,
+                  and runs `sbx kit add` for you when they differ.
+Unchanged kit:    nothing happens.
+```
+
+The comparison covers the whole `.sbx/kit` directory — not just `spec.yaml` — so editing, adding,
+removing or renaming any file in it counts as a change. Moving your checkout somewhere else does not.
+
+`sbx kit add` is an **experimental** Docker Sandboxes feature, so `agent-task` never lets it stand
+between you and your agent: if it fails or your `sbx` does not have it, you get a warning and the
+command to run yourself, and the agent starts anyway in the sandbox as it is.
 
 ```bash
 sbx kit add <sandbox-name> .sbx/kit
 ```
 
-`sbx kit add` is currently an **experimental** Docker Sandboxes feature. `agent-task` does not call it
-automatically:
-
-```text
-New sandbox:      agent-task uses .sbx/kit when creating it.
-Existing sandbox: agent-task reuses the existing sandbox unchanged.
-Future Agent CLI: may detect kit changes and use `sbx kit add` automatically — see issue #7.
-```
+Which kit a sandbox last had is remembered in `.git/agent-cli/kit/` in your repository. It is a cache,
+not state: delete it and the worst that happens is the kit gets applied once more than needed.
 
 ### Work on a task
 
@@ -128,8 +134,9 @@ For a repository at `~/projects/my-app` and branch `feature/new-crud`:
 The trailing hash is derived from the raw branch name, so `feature/foo` and `feature-foo` never
 collide.
 
-There is no state file. Everything is rediscovered from `git worktree list` and `sbx ls`, so you can
-inspect and clean up with plain `git` and `sbx` commands.
+There is no state file. What exists is rediscovered from `git worktree list` and `sbx ls`, so you can
+inspect and clean up with plain `git` and `sbx` commands. The one thing written down — which Sandbox
+Kit a sandbox last got, under `.git/agent-cli/kit/` — is a cache that nothing depends on being there.
 
 ### Tear down a task
 
@@ -182,10 +189,11 @@ worktree or the sandbox is mounted:
 tests/run-tests.sh spike   # real Docker Sandboxes; auto-skips when sbx is unavailable
 ```
 
-The spike is what keeps this project's central assumption honest — that a *linked* git worktree keeps
-working inside a sandbox, including committing to the host repository from within it. It is excluded
-from the default run because it creates real sandboxes and takes minutes rather than seconds, so a
-green `tests/run-tests.sh` on its own does not mean that assumption still holds.
+The spike is what keeps this project's assumptions about Docker Sandboxes honest — that a *linked* git
+worktree keeps working inside a sandbox, including committing to the host repository from within it,
+and that the experimental `sbx kit add` really does apply a changed kit to an existing sandbox. It is
+excluded from the default run because it creates real sandboxes and takes minutes rather than seconds,
+so a green `tests/run-tests.sh` on its own does not mean those assumptions still hold.
 
 ### Releasing
 

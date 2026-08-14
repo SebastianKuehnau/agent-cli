@@ -72,6 +72,23 @@ setup() {
   [[ "$stderr" == *"was kept"* ]] || fail "unexpected stderr: $stderr"
 }
 
+@test "the bundle applies a changed Sandbox Kit, with no sibling lib/" {
+  # Proves lib/kit.sh made it into the bundle, and in a usable order.
+  local repo="$TMP/my-app-kit"
+  make_repo "$repo" >/dev/null
+  mkdir -p "$repo/.sbx/kit"
+  printf 'schemaVersion: "2"\n' >"$repo/.sbx/kit/spec.yaml"
+
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/agent-task' feature/x"
+  assert_success
+
+  printf 'schemaVersion: "2"\nname: changed\n' >"$repo/.sbx/kit/spec.yaml"
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/agent-task' feature/x"
+  assert_success
+  [[ "$stderr" == *"Sandbox Kit changed"* ]] || fail "unexpected stderr: $stderr"
+  assert_equal "$(fake_sbx_kit_call_count)" "1"
+}
+
 @test "the bundle reports the same version as the checkout" {
   run "$INSTALL_DIR/agent-task" --version
   assert_success

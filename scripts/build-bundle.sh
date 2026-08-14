@@ -26,6 +26,7 @@ cat \
   "$ROOT/lib/worktree.sh" \
   "$ROOT/lib/sandbox.sh" \
   "$ROOT/lib/scaffold.sh" \
+  "$ROOT/lib/kit.sh" \
   "$ROOT/lib/session.sh" \
   "$ROOT/lib/selfupdate.sh"
 

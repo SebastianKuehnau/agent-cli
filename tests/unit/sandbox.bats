@@ -185,6 +185,45 @@ setup() {
     fail "unexpected stderr: $stderr"
 }
 
+# --- kit argv ----------------------------------------------------------------
+
+@test "kit add argv has the expected shape" {
+  sandbox_build_kit_add_argv "agent-my-app-feature-x-abc123" "/repo/.sbx/kit"
+  assert_argv sbx kit add "agent-my-app-feature-x-abc123" "/repo/.sbx/kit"
+}
+
+@test "kit add argv keeps a kit path containing spaces as one argument" {
+  sandbox_build_kit_add_argv "agent-x-123456" "/tmp/my app/repo/.sbx/kit"
+  assert_argv sbx kit add "agent-x-123456" "/tmp/my app/repo/.sbx/kit"
+}
+
+# --- kit execution -----------------------------------------------------------
+
+@test "sandbox_apply_kit invokes sbx with the constructed argv" {
+  run sandbox_apply_kit "agent-x-123456" "/repo/.sbx/kit"
+  assert_success
+
+  run cat "$FAKE_SBX_DIR/calls.log"
+  assert_output_contains "arg:kit"
+  assert_output_contains "arg:add"
+  assert_output_contains "arg:agent-x-123456"
+  assert_output_contains "arg:/repo/.sbx/kit"
+}
+
+@test "sandbox_apply_kit returns non-zero on failure instead of exiting" {
+  # `sbx kit add` is experimental, so its failure must be recoverable by the
+  # caller rather than fatal — the whole reason it does not call die.
+  run env FAKE_SBX_KIT_EXIT=1 bash -c "
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/sandbox.sh'
+    sandbox_apply_kit 'agent-x-123456' '/repo/.sbx/kit'
+    printf 'still running, status was %s\n' \"\$?\"
+  "
+  # Reaching the printf at all is the assertion: a die() would have exited.
+  assert_success
+  assert_output_contains "still running, status was 1"
+}
+
 # --- remove argv -------------------------------------------------------------
 
 @test "remove argv has the expected shape" {

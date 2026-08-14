@@ -200,6 +200,11 @@ case "$1" in
       mv "${FAKE_SBX_DIR}/sandboxes.tmp" "${FAKE_SBX_DIR}/sandboxes"
     fi
     ;;
+  kit)
+    # `sbx kit add` is experimental, so its failure has to be testable on its
+    # own, separately from the other subcommands.
+    exit "${FAKE_SBX_KIT_EXIT:-${FAKE_SBX_EXIT:-0}}"
+    ;;
   run) : ;;
 esac
 exit "${FAKE_SBX_EXIT:-0}"
@@ -223,4 +228,12 @@ fake_sbx_calls() {
 # fake_sbx_call_count
 fake_sbx_call_count() {
   grep -c '^=== call$' "$FAKE_SBX_DIR/calls.log" || true
+}
+
+# fake_sbx_kit_call_count — recorded `sbx kit ...` invocations.
+#
+# Matches the whole line, so a kit *directory* among the arguments cannot be
+# mistaken for the `kit` subcommand.
+fake_sbx_kit_call_count() {
+  grep -cx 'arg:kit' "$FAKE_SBX_DIR/calls.log" || true
 }

@@ -79,6 +79,28 @@ naming_short_hash() {
   printf '%s' "${digest:0:AGENT_SHORT_HASH_LENGTH}"
 }
 
+# naming_stream_hash
+#
+# Full SHA-256 of stdin. The streaming counterpart to naming_short_hash, for
+# input too large or too binary to pass as an argument (see scaffold_kit_hash).
+# Not truncated: this one is used to decide whether something changed, where
+# there is no length limit to respect and no reason to weaken it.
+naming_stream_hash() {
+  local digest
+
+  if command -v shasum >/dev/null 2>&1; then
+    digest="$(shasum -a 256)"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum)"
+  else
+    printf 'no SHA-256 utility found (need shasum or sha256sum)\n' >&2
+    return 1
+  fi
+
+  # Both tools print "<digest>  <filename>"; keep the digest only.
+  printf '%s' "${digest%% *}"
+}
+
 # naming_worktree_id <branch>
 #
 # Stable, collision-resistant directory name for a branch's worktree, e.g.

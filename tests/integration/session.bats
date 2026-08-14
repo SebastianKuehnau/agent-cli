@@ -175,6 +175,180 @@ arg:run"
   assert_equal "$(git -C "$REPO" rev-parse feature/x)" "$head_before"
 }
 
+# --- changed Sandbox Kit (issue #7) -----------------------------------------
+
+# kit_digest — the digest agent-task computes for the project's current kit.
+kit_digest() {
+  bash -c "source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/naming.sh'
+    source '$AGENT_LIB/scaffold.sh'
+    scaffold_kit_hash '$REPO'"
+}
+
+# recorded_digest <sandbox> — the digest recorded as applied to <sandbox>.
+recorded_digest() {
+  bash -c "source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/git.sh'
+    source '$AGENT_LIB/kit.sh'
+    kit_cache_read '$REPO' '$1'"
+}
+
+change_kit() {
+  printf 'schemaVersion: "2"\nkind: mixin\nname: changed\n' >"$REPO/.sbx/kit/spec.yaml"
+}
+
+@test "creating a sandbox does not also apply the kit to it" {
+  # `sbx create --kit` already did that; a second application would be noise.
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "0"
+}
+
+@test "creating a sandbox records the kit it was created from" {
+  task feature/new-crud
+  assert_success
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$(kit_digest)"
+}
+
+@test "an unchanged kit is not re-applied on reuse" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "0"
+}
+
+@test "a changed kit is applied to the existing sandbox" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  change_kit
+  task feature/new-crud
+  assert_success
+
+  assert_equal "$(fake_sbx_kit_call_count)" "1"
+  [[ "$stderr" == *"Sandbox Kit changed"* ]] || fail "change not reported: $stderr"
+  [[ "$stderr" == *"Applied the current Sandbox Kit"* ]] || fail "not applied: $stderr"
+}
+
+@test "the kit is applied with the sandbox name and the kit directory, as separate arguments" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  change_kit
+  task feature/new-crud
+  assert_success
+
+  # One argument per line, so a quoting bug cannot hide behind a joined string.
+  run grep -A 3 -x 'arg:kit' "$FAKE_SBX_DIR/calls.log"
+  assert_success
+  assert_equal "$output" "arg:kit
+arg:add
+arg:$(expected_sandbox feature/new-crud)
+arg:$REPO/.sbx/kit"
+}
+
+@test "applying a changed kit records the new digest" {
+  task feature/new-crud
+  assert_success
+  change_kit
+  task feature/new-crud
+  assert_success
+
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$(kit_digest)"
+}
+
+@test "a changed kit is applied once, not on every following run" {
+  task feature/new-crud
+  assert_success
+  change_kit
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "0"
+}
+
+@test "a sandbox whose applied kit is unknown gets the current kit applied" {
+  # The state a sandbox created by an older agent-task is in, and the state a
+  # lost cache entry leaves behind: the kit in there cannot be known, so apply.
+  task feature/new-crud
+  assert_success
+  rm -rf "$REPO/.git/agent-cli"
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "1"
+  [[ "$stderr" == *"is unknown"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "the agent still starts when applying the kit fails" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  change_kit
+  export FAKE_SBX_KIT_EXIT=1
+  task feature/new-crud
+  unset FAKE_SBX_KIT_EXIT
+  assert_success
+
+  # `sbx kit add` is experimental; its failure must not block the agent.
+  [[ "$stderr" == *"Could not apply the changed Sandbox Kit"* ]] ||
+    fail "failure not reported: $stderr"
+  [[ "$stderr" == *"sbx kit add $(expected_sandbox feature/new-crud) $REPO/.sbx/kit"* ]] ||
+    fail "no manual command offered: $stderr"
+  run grep -cx 'arg:run' "$FAKE_SBX_DIR/calls.log"
+  assert_equal "$output" "1"
+}
+
+@test "a failed kit application is retried on the next run" {
+  task feature/new-crud
+  assert_success
+  local before
+  before="$(recorded_digest "$(expected_sandbox feature/new-crud)")"
+
+  change_kit
+  export FAKE_SBX_KIT_EXIT=1
+  task feature/new-crud
+  unset FAKE_SBX_KIT_EXIT
+  assert_success
+
+  # The digest must not have moved on, or the failure would be swallowed.
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$before"
+
+  : >"$FAKE_SBX_DIR/calls.log"
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "1"
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$(kit_digest)"
+}
+
+@test "each sandbox tracks its own applied kit" {
+  task feature/one
+  assert_success
+  change_kit
+  task feature/two
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  # feature/two was created from the changed kit, feature/one predates it.
+  task feature/two
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "0"
+
+  task feature/one
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "1"
+}
+
 # --- naming -----------------------------------------------------------------
 
 @test "the sandbox name is deterministic across runs" {
@@ -341,13 +515,12 @@ arg:run"
     fail "unexpected stderr: $stderr"
 }
 
-# --- no persisted state -----------------------------------------------------
+# --- no persisted state beyond the kit cache --------------------------------
 
 @test "no agent-cli session state is written anywhere" {
   task feature/new-crud
   assert_success
 
-  assert_file_not_exists "$REPO/.git/agent-cli"
   assert_file_not_exists "$REPO/.agent"
   assert_file_not_exists "$REPO/.agent-cli"
 
@@ -355,4 +528,31 @@ arg:run"
   wt="$(expected_worktree feature/new-crud)"
   assert_file_not_exists "$wt/.agent"
   assert_file_not_exists "$wt/.agent-cli"
+}
+
+@test "the applied-kit cache is the only thing agent-cli persists" {
+  task feature/new-crud
+  assert_success
+
+  # Everything under .git/agent-cli must be the kit cache and nothing else, so
+  # that "no persisted session state" stays true apart from the one documented
+  # exception (issue #7).
+  run find "$REPO/.git/agent-cli" -mindepth 1 -maxdepth 1
+  assert_success
+  assert_equal "$output" "$REPO/.git/agent-cli/kit"
+}
+
+@test "the sandbox and worktree are still discovered with the cache deleted" {
+  # The cache is a cache: removing it may cost a kit re-application, but must
+  # not change what agent-task concludes exists.
+  task feature/new-crud
+  assert_success
+  rm -rf "$REPO/.git/agent-cli"
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  task feature/new-crud
+  assert_success
+  [[ "$stderr" == *"Reusing existing branch"* ]] || fail "branch not reused: $stderr"
+  [[ "$stderr" == *"Reusing sandbox"* ]] || fail "sandbox not reused: $stderr"
+  assert_equal "$(grep -c '^arg:create$' "$FAKE_SBX_DIR/calls.log")" "0"
 }

@@ -35,7 +35,8 @@ lib/naming.sh        pure naming functions: slug, short hash, worktree/sandbox/p
 lib/git.sh           repo checks, main-root resolution, branch validation/detection/creation
 lib/worktree.sh      worktree path derivation, registered-worktree lookup, create-or-reuse/remove
 lib/sandbox.sh       sbx presence, existence check, argv construction, execution
-lib/scaffold.sh      `--init` only: create .sbx/kit and download spec.yaml atomically
+lib/scaffold.sh      `--init` and the kit digest: create .sbx/kit, download spec.yaml atomically
+lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a cache, not state)
 lib/session.sh       orchestration of `agent-task <branch>` and `agent-task --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
@@ -49,9 +50,21 @@ tests/               bats suite (see below)
 
 These are load-bearing. Breaking one of them breaks the tool's core guarantees.
 
-1. **No persisted session state.** There is no state file, database or lockfile anywhere. Everything
-   is rediscovered per invocation from `git worktree list --porcelain` and `sbx ls -q`. Do not add
-   `.git/agent-cli/`, `~/.agent-cli/sessions/` or equivalent.
+1. **No persisted session state, with one bounded exception.** What exists is rediscovered per
+   invocation from `git worktree list --porcelain` and `sbx ls -q` — never read back from a file
+   agent-cli wrote earlier. Do not add a session registry, a database, a lockfile,
+   `~/.agent-cli/sessions/` or equivalent.
+
+   The one exception, added by explicit decision for issue #7, is the applied-Sandbox-Kit cache in
+   `lib/kit.sh` at `<main-repo>/.git/agent-cli/kit/<sandbox>`. It exists because Docker Sandboxes
+   offers no way to ask a sandbox which kit it currently has. It is permitted only as a **cache**,
+   and that is what bounds the exception:
+
+   - It may never be consulted to decide whether a branch, a worktree or a sandbox exists.
+   - Losing, deleting or corrupting it may only cause the kit to be applied once more than
+     necessary — never a wrong conclusion, never a failed start.
+
+   Any new persisted data must meet the same two conditions, or it is not allowed.
 2. **Identifiers are `<slug>-<hash>`, and the hash comes from the raw branch name.** This is what
    keeps `feature/foo`, `feature-foo` and `Feature/Foo` apart. Never use a bare sanitised branch name
    as a path or a sandbox name.
@@ -173,6 +186,38 @@ single-file bundle install and `--update` downloads the latest release over it i
 the original bug report (issue #5): a bundle has no `source` lines to fail on in the first place, so
 it can never hit the "`lib/*.sh`: No such file or directory" crash that a single file dropped next to
 a `--init`-only script could.
+
+## How a changed Sandbox Kit reaches an existing sandbox
+
+`.sbx/kit` is read by `sbx create`. Before issue #7, editing it afterwards had no effect until the
+sandbox was recreated by hand. Now `session_start` compares the kit against the one the sandbox
+already has and applies it with `sbx kit add` when they differ.
+
+Three pieces, deliberately separate:
+
+- `scaffold_kit_hash` (`lib/scaffold.sh`) digests the **whole** `.sbx/kit` directory — every file's
+  path, executable bit and content, in `LC_ALL=C` order. Paths are in the digest so a pure rename
+  counts as a change; the digest is independent of where the checkout lives, so moving a repository
+  does not look like a kit change.
+- `lib/kit.sh` remembers the digest last applied, per sandbox. See architectural rule 1 for the
+  invariant that keeps this a cache rather than session state.
+- `sandbox_apply_kit` (`lib/sandbox.sh`) is the only sbx call in the file that **returns** a failure
+  instead of calling `die`.
+
+That last point is the load-bearing one. `sbx kit add` is an *experimental* Docker Sandboxes feature:
+it may be missing from an installed sbx, and its contract may change. So `session_sync_kit`
+(`lib/session.sh`) warns, prints the equivalent manual command, and starts the agent anyway — a
+slightly stale sandbox beats a tool that refuses to run. On that path the digest is deliberately
+**not** recorded, so the next run retries instead of inheriting a false "already applied".
+
+A sandbox with no cache entry — created by an older agent-task, or whose entry was lost — has an
+unknown kit, so the kit is applied. Applying an unchanged kit is wasteful; skipping a changed one is
+the bug this exists to prevent. `--done` drops the entry, otherwise it would later claim that a
+freshly created sandbox of the same name already has that kit.
+
+`tests/spike/sandbox-kit.bats` is what keeps the `sbx kit add` assumption honest — it is the only
+place the real, experimental CLI contract is exercised, and it skips itself when sbx is unavailable.
+A green `tests/run-tests.sh` therefore does **not** mean `sbx kit add` still works as assumed.
 
 ## How the version and `--update`'s version check work
 

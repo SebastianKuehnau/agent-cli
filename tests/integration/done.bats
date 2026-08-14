@@ -30,6 +30,11 @@ expected_worktree() {
     worktree_path '$REPO' '$1'"
 }
 
+expected_sandbox() {
+  bash -c "source '$AGENT_LIB/naming.sh'
+    naming_sandbox_name \"\$(naming_project_id '$REPO')\" '$1'"
+}
+
 # --- removal ------------------------------------------------------------
 
 @test "--done removes an existing worktree and sandbox, keeps the branch" {
@@ -57,6 +62,47 @@ expected_worktree() {
   # The branch itself is untouched.
   run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/new-crud
   assert_success
+}
+
+@test "--done drops the applied-kit record" {
+  # A record left behind would claim a later sandbox of the same name already
+  # has this kit, and the kit would silently never be applied to it.
+  task feature/new-crud
+  assert_success
+  local record="$REPO/.git/agent-cli/kit/$(expected_sandbox feature/new-crud)"
+  assert_file_exists "$record"
+
+  task --done feature/new-crud
+  assert_success
+  assert_file_not_exists "$record"
+}
+
+@test "a sandbox recreated after --done gets the current kit" {
+  task feature/new-crud
+  assert_success
+  task --done feature/new-crud
+  assert_success
+
+  # Recreated from the kit as it is now, and recorded as such — so the next run
+  # neither re-applies it nor skips a later change.
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_kit_call_count)" "0"
+  assert_file_exists "$REPO/.git/agent-cli/kit/$(expected_sandbox feature/new-crud)"
+}
+
+@test "--done removes an orphaned kit record when no sandbox is left" {
+  task feature/new-crud
+  assert_success
+  local record="$REPO/.git/agent-cli/kit/$(expected_sandbox feature/new-crud)"
+
+  # The sandbox is gone from sbx's point of view, but the record is still there.
+  : >"$FAKE_SBX_DIR/sandboxes"
+
+  task --done feature/new-crud
+  assert_success
+  [[ "$stderr" == *"No sandbox found"* ]] || fail "unexpected stderr: $stderr"
+  assert_file_not_exists "$record"
 }
 
 @test "--done is a no-op with an informative message when nothing exists" {

@@ -89,6 +89,25 @@ sandbox_attach() {
   exec "${AGENT_SBX_ARGV[@]}"
 }
 
+# sandbox_build_kit_add_argv <name> <kit-dir>
+sandbox_build_kit_add_argv() {
+  AGENT_SBX_ARGV=(sbx kit add "$1" "$2")
+}
+
+# sandbox_apply_kit <name> <kit-dir>
+#
+# Apply a Sandbox Kit to an *existing* sandbox, returning non-zero on failure
+# rather than dying — unlike every other sbx call in this file.
+#
+# That is on purpose: `sbx kit add` is an experimental Docker Sandboxes feature,
+# so an installed sbx may not have it at all, and its contract may change. A
+# sandbox running a slightly stale kit is a far better outcome than agent-task
+# refusing to start the agent, so the caller warns and carries on.
+sandbox_apply_kit() {
+  sandbox_build_kit_add_argv "$@"
+  "${AGENT_SBX_ARGV[@]}"
+}
+
 # sandbox_build_remove_argv <name>
 sandbox_build_remove_argv() {
   AGENT_SBX_ARGV=(sbx rm --force "$1")
