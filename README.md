@@ -23,26 +23,45 @@ Two ways to install, each updated differently:
 
 ```bash
 git clone https://github.com/SebastianKuehnau/agent-cli.git
-ln -s "$PWD/agent-cli/bin/agent-task" ~/.local/bin/agent-task
+ln -s "$PWD/agent-cli/bin/task-agent" ~/.local/bin/task-agent
 ```
 
-**Single file** — download the self-contained release bundle; update with `agent-task --update`.
+**Single file** — download the self-contained release bundle; update with `task-agent --update`.
 
 ```bash
-curl -Lo ~/.local/bin/agent-task \
-  https://github.com/SebastianKuehnau/agent-cli/releases/latest/download/agent-task
-chmod +x ~/.local/bin/agent-task
+curl -Lo ~/.local/bin/task-agent \
+  https://github.com/SebastianKuehnau/agent-cli/releases/latest/download/task-agent
+chmod +x ~/.local/bin/task-agent
+```
+
+### Coming from `agent-task`
+
+The command was called `agent-task` up to v0.1.0 and is `task-agent` from v0.2.0 on. Nothing about
+your existing tasks changes — branches, worktrees and sandboxes keep their names, so tasks started
+with `agent-task` are picked up by `task-agent` unchanged.
+
+Only how you invoke it changes:
+
+```bash
+# git checkout
+ln -sfn "$PWD/agent-cli/bin/task-agent" ~/.local/bin/task-agent
+rm ~/.local/bin/agent-task
+
+# single file: --update keeps working and installs the renamed tool in place,
+# because each release also publishes the bundle under the old asset name.
+agent-task --update
+mv ~/.local/bin/agent-task ~/.local/bin/task-agent
 ```
 
 ## Usage
 
 ```
 Usage:
-  agent-task --init
-  agent-task <branch> [--base <branch>]
-  agent-task --done <branch>
-  agent-task --update
-  agent-task --version
+  task-agent --init
+  task-agent <branch> [--base <branch>]
+  task-agent --done <branch>
+  task-agent --update
+  task-agent --version
 
 Commands:
   --init        Download the Docker Sandbox Kit into the current project.
@@ -50,7 +69,7 @@ Commands:
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
-  --update      Install the latest agent-task release, unless it is already
+  --update      Install the latest task-agent release, unless it is already
                 installed. Only works for a single-file install; a git
                 checkout is updated with 'git pull' instead.
   --version     Print the installed version.
@@ -67,7 +86,7 @@ Once per project:
 
 ```bash
 cd ~/projects/my-app
-agent-task --init
+task-agent --init
 ```
 
 This downloads a Sandbox Kit to `.sbx/kit/spec.yaml` and does nothing else — it does not touch
@@ -79,11 +98,11 @@ An existing `.sbx/kit/spec.yaml` is never overwritten.
 ### Updating the Sandbox Kit
 
 Edit `.sbx/kit` whenever your project's toolchain or network policy changes, then just run
-`agent-task <branch>` again. It notices and applies the change:
+`task-agent <branch>` again. It notices and applies the change:
 
 ```text
-New sandbox:      agent-task uses .sbx/kit when creating it.
-Existing sandbox: agent-task compares .sbx/kit against the kit that sandbox already has,
+New sandbox:      task-agent uses .sbx/kit when creating it.
+Existing sandbox: task-agent compares .sbx/kit against the kit that sandbox already has,
                   and runs `sbx kit add` for you when they differ.
 Unchanged kit:    nothing happens.
 ```
@@ -91,7 +110,7 @@ Unchanged kit:    nothing happens.
 The comparison covers the whole `.sbx/kit` directory — not just `spec.yaml` — so editing, adding,
 removing or renaming any file in it counts as a change. Moving your checkout somewhere else does not.
 
-`sbx kit add` is an **experimental** Docker Sandboxes feature, so `agent-task` never lets it stand
+`sbx kit add` is an **experimental** Docker Sandboxes feature, so `task-agent` never lets it stand
 between you and your agent: if it fails or your `sbx` does not have it, you get a warning and the
 command to run yourself, and the agent starts anyway in the sandbox as it is.
 
@@ -105,20 +124,20 @@ not state: delete it and the worst that happens is the kit gets applied once mor
 ### Work on a task
 
 ```bash
-agent-task feature/new-crud
+task-agent feature/new-crud
 ```
 
 That single command creates the branch from `main`, creates a worktree for it, creates a sandbox, and
 starts Claude Code inside it. To base a new branch on something else:
 
 ```bash
-agent-task feature/new-crud --base develop
+task-agent feature/new-crud --base develop
 ```
 
 Run the same command again later and everything is reused — same branch, same worktree, same sandbox:
 
 ```bash
-agent-task feature/new-crud       # resumes where you left off
+task-agent feature/new-crud       # resumes where you left off
 ```
 
 ### What gets created
@@ -141,7 +160,7 @@ Kit a sandbox last got, under `.git/agent-cli/kit/` — is a cache that nothing 
 ### Tear down a task
 
 ```bash
-agent-task --done feature/new-crud
+task-agent --done feature/new-crud
 ```
 
 Removes the sandbox and the worktree for `feature/new-crud`, if they exist. The branch itself is
@@ -152,24 +171,24 @@ If the worktree has uncommitted or untracked changes, `--done` refuses to remove
 worktree-removal safety check, not a separate one agent-cli adds) rather than silently discarding
 work. Commit, stash, or remove those changes and run it again.
 
-### Updating agent-task
+### Updating task-agent
 
 ```bash
-agent-task --update
+task-agent --update
 ```
 
 Installs the latest release in place — but only if it is not already installed:
 
 ```bash
-$ agent-task --version
+$ task-agent --version
 0.2.0
-$ agent-task --update
-[agent-task] agent-task 0.2.0 is already the latest release.
+$ task-agent --update
+[task-agent] task-agent 0.2.0 is already the latest release.
 ```
 
-The installed version is the one printed by `agent-task --version`; the latest released version is
+The installed version is the one printed by `task-agent --version`; the latest released version is
 read from where `…/releases/latest` redirects to, which needs no GitHub token and no API quota. If
-that check cannot be made at all, `agent-task` says so and downloads anyway, so a hiccup in the check
+that check cannot be made at all, `task-agent` says so and downloads anyway, so a hiccup in the check
 can never leave you unable to update.
 
 This only works for a single-file install (see [Install](#install) above) — a git checkout has
@@ -197,10 +216,10 @@ so a green `tests/run-tests.sh` on its own does not mean those assumptions still
 
 ### Releasing
 
-Bump `AGENT_TASK_VERSION` in `lib/version.sh` in the commit you are about to tag, then push the
+Bump `TASK_AGENT_VERSION` in `lib/version.sh` in the commit you are about to tag, then push the
 matching `v*` tag. That runs `.github/workflows/release.yml`, which refuses a tag that does not match
 the declared version, builds the single-file bundle with `scripts/build-bundle.sh`, and publishes it
-as that release's `agent-task` asset — the exact file `agent-task --update` downloads. `bin/` and
+as that release's `task-agent` asset — the exact file `task-agent --update` downloads. `bin/` and
 `lib/` remain the source of truth; the bundle is a release-time build artifact, not something
 committed to the repository.
 

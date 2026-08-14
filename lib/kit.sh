@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The applied-Sandbox-Kit cache (issue #7).
 #
-# `agent-task <branch>` must notice that .sbx/kit changed since an existing
+# `task-agent <branch>` must notice that .sbx/kit changed since an existing
 # sandbox was created, and Docker Sandboxes exposes no way to ask a sandbox
 # which kit it currently has. So the digest of the kit that was last applied is
 # remembered here, one file per sandbox:
@@ -14,7 +14,7 @@
 # whether a branch, a worktree or a sandbox exists — that is still rediscovered
 # from `git worktree list` and `sbx ls` alone. Losing, deleting or corrupting
 # these files may only cause the kit to be applied once more than necessary; it
-# must never change what agent-task concludes about the world. Every function
+# must never change what task-agent concludes about the world. Every function
 # below is written to that rule: a read failure is indistinguishable from "not
 # recorded", and a write failure is reported but never fatal.
 #

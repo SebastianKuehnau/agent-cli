@@ -237,7 +237,7 @@ These carry no container semantics and should not change if the runtime changes.
 - **All configuration resolution** — `config.sh` (F14, F21-F25, F35). Pure precedence and parsing.
 - **Naming and identity** — `sanitize`, project name, and the *policy* of deriving a stable per-task
   identifier (F13-F16). The runtime consumes the name; it should not define it.
-- **CLI surface, parsing, logging, exit codes** — `bin/agent-task`, `logging.sh` (F08, F63, F64, F65).
+- **CLI surface, parsing, logging, exit codes** — `bin/task-agent`, `logging.sh` (F08, F63, F64, F65).
 - **The session/task model** — what a task *is*, its lifecycle states, and how state is discovered or stored
   (F37, [Current state handling](./current-script-analysis.md#current-state-handling)).
 - **The sync workflow's decision logic** — preconditions, step ordering, exit-code contract, PR policy

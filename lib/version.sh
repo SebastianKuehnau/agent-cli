@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The version of agent-task, and the single source of truth for it.
+# The version of task-agent, and the single source of truth for it.
 #
 # It is a plain constant in the source rather than something derived at runtime
 # from git: the single-file release bundle has no repository to ask, and asking
@@ -17,5 +17,5 @@ if [[ -n "${AGENT_VERSION_SH_LOADED:-}" ]]; then
 fi
 AGENT_VERSION_SH_LOADED=1
 
-# shellcheck disable=SC2034  # read by bin/agent-task and lib/selfupdate.sh.
-readonly AGENT_TASK_VERSION="0.2.0"
+# shellcheck disable=SC2034  # read by bin/task-agent and lib/selfupdate.sh.
+readonly TASK_AGENT_VERSION="0.2.0"

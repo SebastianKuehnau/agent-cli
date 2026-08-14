@@ -129,7 +129,7 @@ worktree_ensure() {
   if [[ -e "$path" ]]; then
     die "Worktree path already exists but is not a registered git worktree:" \
       "  $path" \
-      "Remove or rename it, then run agent-task again."
+      "Remove or rename it, then run task-agent again."
   fi
 
   local root
@@ -158,7 +158,7 @@ worktree_remove() {
     die "Failed to remove the worktree at:" \
       "  $path" \
       "It may contain uncommitted or untracked changes. Commit, stash, or" \
-      "remove them, then run agent-task --done again." \
+      "remove them, then run task-agent --done again." \
       "" \
       "To remove it anyway and discard those changes, run:" \
       "  git -C '$main_root' worktree remove --force '$path'"

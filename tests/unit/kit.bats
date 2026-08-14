@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
 # The Sandbox Kit digest (scaffold_kit_hash) and the applied-kit cache
-# (lib/kit.sh) that together let `agent-task <branch>` notice a changed kit
+# (lib/kit.sh) that together let `task-agent <branch>` notice a changed kit
 # (issue #7).
 #
 # The digest is what decides whether a sandbox gets `sbx kit add` applied to it,

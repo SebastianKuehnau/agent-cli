@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Phase 1 is implemented: `agent-task --init` and `agent-task <branch> [--base <branch>]`, backed by
+Phase 1 is implemented: `task-agent --init` and `task-agent <branch> [--base <branch>]`, backed by
 Docker Sandboxes (`sbx`). The tool is **bash**, not Java — the `.idea/` directory is a leftover of the
 original scaffold and is not used by the build or the tests.
 
@@ -12,6 +12,13 @@ original scaffold and is not used by the build or the tests.
 `--version` by a further one (issue #6, which needed a version to compare), which is why none of them
 are in the Phase 1 exclusion list under "Scope discipline" below. Everything else in that list still
 applies.
+
+The command was renamed from `agent-task` to `task-agent` in v0.2.0 (issue #8). The rename covers the
+executable, the `TASK_AGENT_*` environment overrides, the `[task-agent]` log prefix and the release
+asset. It deliberately stops there: the repository is still `agent-cli`, the internal `AGENT_*`
+variable prefix still refers to agent-cli rather than to the command, and — load-bearing — the
+`agent-` sandbox prefix and every derived worktree path are **unchanged**, so tasks started before the
+rename are still found afterwards. Do not "finish" the rename into those.
 
 ## Intent
 
@@ -28,8 +35,8 @@ Two analysis documents in `docs/` explain where the design comes from:
 ## Layout
 
 ```
-bin/agent-task       argument parsing, dispatch, help — no git or sbx logic
-lib/version.sh       AGENT_TASK_VERSION — the single source of truth for the version
+bin/task-agent       argument parsing, dispatch, help — no git or sbx logic
+lib/version.sh       TASK_AGENT_VERSION — the single source of truth for the version
 lib/logging.sh       info / success / warning / error / die  (everything to stderr)
 lib/naming.sh        pure naming functions: slug, short hash, worktree/sandbox/project ids
 lib/git.sh           repo checks, main-root resolution, branch validation/detection/creation
@@ -37,14 +44,14 @@ lib/worktree.sh      worktree path derivation, registered-worktree lookup, creat
 lib/sandbox.sh       sbx presence, existence check, argv construction, execution
 lib/scaffold.sh      `--init` and the kit digest: create .sbx/kit, download spec.yaml atomically
 lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a cache, not state)
-lib/session.sh       orchestration of `agent-task <branch>` and `agent-task --done <branch>`
+lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
                          artifact `.github/workflows/release.yml` publishes; not runtime code
 tests/               bats suite (see below)
 ```
 
-`bin/agent-task` resolves its own directory through symlinks, so a symlinked install works.
+`bin/task-agent` resolves its own directory through symlinks, so a symlinked install works.
 
 ## Architectural rules
 
@@ -120,9 +127,9 @@ tests/run-tests.sh integration
 tests/run-tests.sh spike               # real Docker Sandboxes; auto-skips without sbx
 tests/run-tests.sh all
 
-AGENT_TASK_NETWORK_TESTS=1 tests/run-tests.sh unit   # also hits the real kit URL
+TASK_AGENT_NETWORK_TESTS=1 tests/run-tests.sh unit   # also hits the real kit URL
 
-shellcheck -x -s bash bin/agent-task lib/*.sh
+shellcheck -x -s bash bin/task-agent lib/*.sh
 ```
 
 Conventions:
@@ -171,14 +178,16 @@ a user who wants to override git's own refusal can already do so directly with
 
 ## How `--update` and the release bundle fit together
 
-`bin/agent-task` + `lib/*.sh` is the only source layout and stays that way — it is what makes every
+`bin/task-agent` + `lib/*.sh` is the only source layout and stays that way — it is what makes every
 module unit-testable. `scripts/build-bundle.sh` is a release-time build step, not a second
-implementation: it concatenates the lib files and `bin/agent-task` (minus its `source
+implementation: it concatenates the lib files and `bin/task-agent` (minus its `source
 "$AGENT_LIB_DIR/..."` lines) into one self-contained file with no text surgery beyond dropping those
 lines. `.github/workflows/release.yml` runs it on every `v*` tag push and publishes the result as
-that release's `agent-task` asset.
+that release's `task-agent` asset — plus an identical copy named `agent-task`, because installs from
+before the rename look for that asset name and would otherwise get a 404 from `--update` instead of
+the release that renames the tool. Keep publishing both.
 
-`cmd_update` (`bin/agent-task`) tells the two supported install shapes apart by checking whether
+`cmd_update` (`bin/task-agent`) tells the two supported install shapes apart by checking whether
 `$AGENT_LIB_DIR` exists: if it does, this is a git checkout (or a symlink into one) and `--update` has
 nothing of its own to replace, so it refuses with a `git pull` hint; if it does not, this is a
 single-file bundle install and `--update` downloads the latest release over it in place
@@ -210,7 +219,7 @@ it may be missing from an installed sbx, and its contract may change. So `sessio
 slightly stale sandbox beats a tool that refuses to run. On that path the digest is deliberately
 **not** recorded, so the next run retries instead of inheriting a false "already applied".
 
-A sandbox with no cache entry — created by an older agent-task, or whose entry was lost — has an
+A sandbox with no cache entry — created by an older task-agent, or whose entry was lost — has an
 unknown kit, so the kit is applied. Applying an unchanged kit is wasteful; skipping a changed one is
 the bug this exists to prevent. `--done` drops the entry, otherwise it would later claim that a
 freshly created sandbox of the same name already has that kit.
@@ -221,12 +230,12 @@ A green `tests/run-tests.sh` therefore does **not** mean `sbx kit add` still wor
 
 ## How the version and `--update`'s version check work
 
-`lib/version.sh`'s `AGENT_TASK_VERSION` is the only place the version is written down, and
-`agent-task --version` prints it. It is a plain constant rather than something derived from git: the
+`lib/version.sh`'s `TASK_AGENT_VERSION` is the only place the version is written down, and
+`task-agent --version` prints it. It is a plain constant rather than something derived from git: the
 release bundle has no repository to ask, and asking git would make an installed bundle's version
 depend on whichever directory it was run from.
 
-`.github/workflows/release.yml` refuses to publish a tag that does not match `AGENT_TASK_VERSION`.
+`.github/workflows/release.yml` refuses to publish a tag that does not match `TASK_AGENT_VERSION`.
 That check is load-bearing, not hygiene — it is the only thing that makes a version comparison
 against the latest release mean anything. Bump the constant in the commit you tag.
 

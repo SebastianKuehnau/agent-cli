@@ -7,7 +7,7 @@
 # Repository under test.
 AGENT_REPO_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export AGENT_REPO_ROOT
-export AGENT_TASK="$AGENT_REPO_ROOT/bin/agent-task"
+export TASK_AGENT="$AGENT_REPO_ROOT/bin/task-agent"
 export AGENT_LIB="$AGENT_REPO_ROOT/lib"
 
 # ---------------------------------------------------------------------------

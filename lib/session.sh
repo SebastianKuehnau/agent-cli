@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Orchestration for `agent-task <branch> [--base <branch>]` and
-# `agent-task --done <branch>`.
+# Orchestration for `task-agent <branch> [--base <branch>]` and
+# `task-agent --done <branch>`.
 #
 # This module only sequences the other modules; it contains no git plumbing, no
 # path derivation and no sbx argument construction of its own.
@@ -76,7 +76,7 @@ session_start() {
 # one (issue #7). Before this, editing .sbx/kit had no effect until the sandbox
 # was recreated by hand.
 #
-# A sandbox with no cache entry — one created by an older agent-task, or whose
+# A sandbox with no cache entry — one created by an older task-agent, or whose
 # entry was lost — has an unknown kit, so the kit is applied. Applying an
 # unchanged kit is wasteful but harmless; skipping a changed one is the bug this
 # exists to prevent.

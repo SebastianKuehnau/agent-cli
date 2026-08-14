@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Argument parsing, dispatch and help for bin/agent-task.
+# Argument parsing, dispatch and help for bin/task-agent.
 #
 # Session-starting invocations are run inside a repo with no Sandbox Kit, so
 # they stop at a well-defined, side-effect-free point after the arguments have
@@ -22,7 +22,7 @@ setup() {
 
 cli() {
   run --separate-stderr bash -c \
-    "cd '$REPO' && '$AGENT_TASK' $(printf '%q ' "$@")"
+    "cd '$REPO' && '$TASK_AGENT' $(printf '%q ' "$@")"
 }
 
 # --- help -------------------------------------------------------------------
@@ -31,14 +31,30 @@ cli() {
   cli --help
   assert_success
   assert_output_contains "Usage:"
-  assert_output_contains "agent-task --init"
-  assert_output_contains "agent-task <branch> [--base <branch>]"
+  assert_output_contains "task-agent --init"
+  assert_output_contains "task-agent <branch> [--base <branch>]"
 }
 
 @test "-h is equivalent to --help" {
   cli -h
   assert_success
   assert_output_contains "Usage:"
+}
+
+@test "help calls the command task-agent, not agent-task" {
+  # The command was renamed in v0.2.0 (issue #8); a half-done rename would show
+  # up here first.
+  cli --help
+  assert_success
+  assert_output_contains "task-agent --init"
+  assert_output_not_contains "agent-task"
+}
+
+@test "log output is prefixed with the current command name" {
+  cli feature/new-crud
+  assert_failure
+  [[ "$stderr" == *"[task-agent]"* ]] || fail "unexpected log prefix: $stderr"
+  [[ "$stderr" != *"[agent-task]"* ]] || fail "stale log prefix: $stderr"
 }
 
 @test "help documents --base and its default" {
@@ -69,7 +85,7 @@ cli() {
 
 @test "--version prints the version from lib/version.sh on stdout" {
   local declared
-  declared="$(bash -c "source '$AGENT_LIB/version.sh'; printf '%s' \"\$AGENT_TASK_VERSION\"")"
+  declared="$(bash -c "source '$AGENT_LIB/version.sh'; printf '%s' \"\$TASK_AGENT_VERSION\"")"
 
   cli --version
   assert_success
@@ -89,7 +105,7 @@ cli() {
   # It reports a property of the install, not of any repository.
   local outside="$TMP/not-a-repo"
   mkdir -p "$outside"
-  run --separate-stderr bash -c "cd '$outside' && '$AGENT_TASK' --version"
+  run --separate-stderr bash -c "cd '$outside' && '$TASK_AGENT' --version"
   assert_success
 }
 
@@ -272,7 +288,7 @@ cli() {
 @test "the missing-kit error tells the user to run --init" {
   cli feature/new-crud
   assert_failure
-  [[ "$stderr" == *"agent-task --init"* ]] || fail "unexpected stderr: $stderr"
+  [[ "$stderr" == *"task-agent --init"* ]] || fail "unexpected stderr: $stderr"
 }
 
 @test "the kit check runs before any branch or worktree is created" {
@@ -294,7 +310,7 @@ cli() {
   ln -s "$(command -v shasum 2>/dev/null || command -v sha256sum)" "$stub/shasum" 2>/dev/null || true
 
   run --separate-stderr env PATH="$stub:/usr/bin:/bin" \
-    bash -c "cd '$REPO' && '$AGENT_TASK' feature/x"
+    bash -c "cd '$REPO' && '$TASK_AGENT' feature/x"
   assert_failure
   [[ "$stderr" == *"sbx"* ]] || fail "unexpected stderr: $stderr"
   [[ "$stderr" == *"Docker Sandboxes"* ]] || fail "unexpected stderr: $stderr"
@@ -303,7 +319,7 @@ cli() {
 @test "running outside a git repository fails for a branch invocation" {
   local outside="$TMP/not-a-repo"
   mkdir -p "$outside"
-  run --separate-stderr bash -c "cd '$outside' && '$AGENT_TASK' feature/x"
+  run --separate-stderr bash -c "cd '$outside' && '$TASK_AGENT' feature/x"
   assert_failure
   [[ "$stderr" == *"Not inside a git repository"* ]] ||
     fail "unexpected stderr: $stderr"

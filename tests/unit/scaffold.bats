@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Tests for `agent-task --init`.
+# Tests for `task-agent --init`.
 #
 # The download URL is redirected to a local file:// URL, which curl handles
 # natively, so these tests need no network and never touch GitHub. A separate
@@ -23,18 +23,18 @@ name: my-project
 EOF
 }
 
-# init_in <dir> — run `agent-task --init` from <dir> with the fixture URL.
+# init_in <dir> — run `task-agent --init` from <dir> with the fixture URL.
 init_in() {
   run --separate-stderr env \
-    AGENT_TASK_KIT_URL="file://$FIXTURE" \
-    bash -c "cd '$1' && '$AGENT_TASK' --init"
+    TASK_AGENT_KIT_URL="file://$FIXTURE" \
+    bash -c "cd '$1' && '$TASK_AGENT' --init"
 }
 
 # init_with_url <dir> <url>
 init_with_url() {
   run --separate-stderr env \
-    AGENT_TASK_KIT_URL="$2" \
-    bash -c "cd '$1' && '$AGENT_TASK' --init"
+    TASK_AGENT_KIT_URL="$2" \
+    bash -c "cd '$1' && '$TASK_AGENT' --init"
 }
 
 # --- happy path -------------------------------------------------------------
@@ -201,7 +201,7 @@ init_with_url() {
   assert_failure
   [[ "$stderr" == *"No Sandbox Kit found at .sbx/kit/spec.yaml"* ]] ||
     fail "unexpected stderr: $stderr"
-  [[ "$stderr" == *"agent-task --init"* ]] ||
+  [[ "$stderr" == *"task-agent --init"* ]] ||
     fail "error message lacks the --init hint: $stderr"
 }
 
@@ -218,11 +218,11 @@ init_with_url() {
 
 # --- optional network test --------------------------------------------------
 
-@test "the real kit URL is reachable and non-empty (AGENT_TASK_NETWORK_TESTS=1)" {
-  [[ -n "${AGENT_TASK_NETWORK_TESTS:-}" ]] ||
-    skip "set AGENT_TASK_NETWORK_TESTS=1 to test against the real URL"
+@test "the real kit URL is reachable and non-empty (TASK_AGENT_NETWORK_TESTS=1)" {
+  [[ -n "${TASK_AGENT_NETWORK_TESTS:-}" ]] ||
+    skip "set TASK_AGENT_NETWORK_TESTS=1 to test against the real URL"
 
-  run --separate-stderr bash -c "cd '$REPO' && '$AGENT_TASK' --init"
+  run --separate-stderr bash -c "cd '$REPO' && '$TASK_AGENT' --init"
   assert_success
   assert_file_exists "$REPO/.sbx/kit/spec.yaml"
   [[ -s "$REPO/.sbx/kit/spec.yaml" ]] || fail "downloaded spec.yaml is empty"

@@ -10,7 +10,7 @@ setup() {
   load '../helpers/common'
 
   TMP="$(make_tmpdir)"
-  BUNDLE="$TMP/agent-task"
+  BUNDLE="$TMP/task-agent"
   "$AGENT_REPO_ROOT/scripts/build-bundle.sh" >"$BUNDLE"
   chmod +x "$BUNDLE"
 
@@ -18,8 +18,8 @@ setup() {
   # single-file install (e.g. ~/.local/bin with nothing else in it).
   INSTALL_DIR="$TMP/install"
   mkdir -p "$INSTALL_DIR"
-  cp "$BUNDLE" "$INSTALL_DIR/agent-task"
-  chmod +x "$INSTALL_DIR/agent-task"
+  cp "$BUNDLE" "$INSTALL_DIR/task-agent"
+  chmod +x "$INSTALL_DIR/task-agent"
 
   make_fake_sbx "$TMP/fake"
 }
@@ -35,12 +35,12 @@ setup() {
   assert_equal "$output" "0"
 }
 
-@test "the bundle's --help output matches bin/agent-task's" {
-  run "$INSTALL_DIR/agent-task" --help
+@test "the bundle's --help output matches bin/task-agent's" {
+  run "$INSTALL_DIR/task-agent" --help
   assert_success
   local bundled="$output"
 
-  run "$AGENT_TASK" --help
+  run "$TASK_AGENT" --help
   assert_success
 
   assert_equal "$bundled" "$output"
@@ -50,7 +50,7 @@ setup() {
   local repo="$TMP/my-app"
   make_repo "$repo" >/dev/null
 
-  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/agent-task' feature/x"
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_failure
   [[ "$stderr" == *"No Sandbox Kit found"* ]] ||
     fail "bundle did not reach the kit check (a source-time crash?): $stderr"
@@ -64,10 +64,10 @@ setup() {
   mkdir -p "$repo/.sbx/kit"
   printf 'schemaVersion: "2"\n' >"$repo/.sbx/kit/spec.yaml"
 
-  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/agent-task' feature/x"
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
 
-  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/agent-task' --done feature/x"
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' --done feature/x"
   assert_success
   [[ "$stderr" == *"was kept"* ]] || fail "unexpected stderr: $stderr"
 }
@@ -79,22 +79,22 @@ setup() {
   mkdir -p "$repo/.sbx/kit"
   printf 'schemaVersion: "2"\n' >"$repo/.sbx/kit/spec.yaml"
 
-  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/agent-task' feature/x"
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
 
   printf 'schemaVersion: "2"\nname: changed\n' >"$repo/.sbx/kit/spec.yaml"
-  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/agent-task' feature/x"
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
   [[ "$stderr" == *"Sandbox Kit changed"* ]] || fail "unexpected stderr: $stderr"
   assert_equal "$(fake_sbx_kit_call_count)" "1"
 }
 
 @test "the bundle reports the same version as the checkout" {
-  run "$INSTALL_DIR/agent-task" --version
+  run "$INSTALL_DIR/task-agent" --version
   assert_success
   local bundled="$output"
 
-  run "$AGENT_TASK" --version
+  run "$TASK_AGENT" --version
   assert_success
 
   assert_equal "$bundled" "$output"
@@ -104,9 +104,9 @@ setup() {
   # Both URLs are local: an unresolvable version probe warns and falls through
   # to the download, which is the step under test here.
   run --separate-stderr env \
-    AGENT_TASK_UPDATE_URL="file://$TMP/does-not-exist" \
-    AGENT_TASK_LATEST_URL="file://$TMP/no-such-release" \
-    "$INSTALL_DIR/agent-task" --update
+    TASK_AGENT_UPDATE_URL="file://$TMP/does-not-exist" \
+    TASK_AGENT_LATEST_URL="file://$TMP/no-such-release" \
+    "$INSTALL_DIR/task-agent" --update
   assert_failure
   # It must fail on the download (no such fixture), not on the lib/ check.
   [[ "$stderr" == *"Failed to download"* ]] || fail "unexpected stderr: $stderr"
@@ -114,7 +114,7 @@ setup() {
 }
 
 @test "--update on a checkout (this repo) refuses, since lib/ is present" {
-  run --separate-stderr "$AGENT_TASK" --update
+  run --separate-stderr "$TASK_AGENT" --update
   assert_failure
   [[ "$stderr" == *"git checkout"* ]] || fail "unexpected stderr: $stderr"
 }

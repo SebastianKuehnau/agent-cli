@@ -24,7 +24,7 @@ declare -a AGENT_SBX_ARGV=()
 sandbox_require_cli() {
   command -v sbx >/dev/null 2>&1 ||
     die "The Docker Sandboxes CLI (sbx) is not installed or not on PATH." \
-      "Install Docker Sandboxes, then run agent-task again."
+      "Install Docker Sandboxes, then run task-agent again."
 }
 
 # sandbox_exists <name>
@@ -101,7 +101,7 @@ sandbox_build_kit_add_argv() {
 #
 # That is on purpose: `sbx kit add` is an experimental Docker Sandboxes feature,
 # so an installed sbx may not have it at all, and its contract may change. A
-# sandbox running a slightly stale kit is a far better outcome than agent-task
+# sandbox running a slightly stale kit is a far better outcome than task-agent
 # refusing to start the agent, so the caller warns and carries on.
 sandbox_apply_kit() {
   sandbox_build_kit_add_argv "$@"

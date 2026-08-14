@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Self-update for a single-file agent-task install.
+# Self-update for a single-file task-agent install.
 #
 # Only makes sense for the single-file distribution (see scripts/build-bundle.sh):
 # a git checkout has its own lib/ files to update and is refreshed with
-# `git pull`, which bin/agent-task's cmd_update checks for before calling in
+# `git pull`, which bin/task-agent's cmd_update checks for before calling in
 # here at all.
 #
-# Requires lib/version.sh for AGENT_TASK_VERSION.
+# Requires lib/version.sh for TASK_AGENT_VERSION.
 
 if [[ -n "${AGENT_SELFUPDATE_SH_LOADED:-}" ]]; then
   return 0
@@ -15,10 +15,10 @@ AGENT_SELFUPDATE_SH_LOADED=1
 
 # Overridable so tests can point at local file:// URLs (curl handles those
 # natively) instead of depending on GitHub being reachable.
-: "${AGENT_TASK_REPO:=SebastianKuehnau/agent-cli}"
-: "${AGENT_TASK_UPDATE_ASSET:=agent-task}"
-: "${AGENT_TASK_UPDATE_URL:=https://github.com/${AGENT_TASK_REPO}/releases/latest/download/${AGENT_TASK_UPDATE_ASSET}}"
-: "${AGENT_TASK_LATEST_URL:=https://github.com/${AGENT_TASK_REPO}/releases/latest}"
+: "${TASK_AGENT_REPO:=SebastianKuehnau/agent-cli}"
+: "${TASK_AGENT_UPDATE_ASSET:=task-agent}"
+: "${TASK_AGENT_UPDATE_URL:=https://github.com/${TASK_AGENT_REPO}/releases/latest/download/${TASK_AGENT_UPDATE_ASSET}}"
+: "${TASK_AGENT_LATEST_URL:=https://github.com/${TASK_AGENT_REPO}/releases/latest}"
 
 # selfupdate_latest_version
 #
@@ -37,7 +37,7 @@ selfupdate_latest_version() {
 
   effective="$(curl --fail --silent --head --location \
     --output /dev/null --write-out '%{url_effective}' \
-    "$AGENT_TASK_LATEST_URL" 2>/dev/null)" || return 1
+    "$TASK_AGENT_LATEST_URL" 2>/dev/null)" || return 1
 
   tag="${effective%/}"
   tag="${tag##*/}"
@@ -73,37 +73,37 @@ selfupdate_run() {
 
   local latest
   if latest="$(selfupdate_latest_version)"; then
-    if [[ "$latest" == "$AGENT_TASK_VERSION" ]]; then
-      success "agent-task $AGENT_TASK_VERSION is already the latest release."
+    if [[ "$latest" == "$TASK_AGENT_VERSION" ]]; then
+      success "task-agent $TASK_AGENT_VERSION is already the latest release."
       return 0
     fi
-    info "Updating agent-task from $AGENT_TASK_VERSION to $latest"
+    info "Updating task-agent from $TASK_AGENT_VERSION to $latest"
   else
     warning "Could not determine the latest released version from:"
-    warning "  $AGENT_TASK_LATEST_URL"
+    warning "  $TASK_AGENT_LATEST_URL"
     warning "Downloading the latest release anyway."
   fi
 
   local dir tmp
   dir="$(dirname "$self")"
-  tmp="$(mktemp "$dir/.agent-task.XXXXXX")" ||
+  tmp="$(mktemp "$dir/.task-agent.XXXXXX")" ||
     die "Could not create a temporary file in $dir"
 
   # shellcheck disable=SC2064  # $tmp must be expanded now, not at trap time.
   trap "rm -f -- '$tmp'" EXIT
 
-  info "Downloading the latest agent-task from $AGENT_TASK_UPDATE_URL"
+  info "Downloading the latest task-agent from $TASK_AGENT_UPDATE_URL"
 
   if ! curl --fail --silent --show-error --location \
-    --output "$tmp" "$AGENT_TASK_UPDATE_URL"; then
+    --output "$tmp" "$TASK_AGENT_UPDATE_URL"; then
     die "Failed to download the update from:" \
-      "  $AGENT_TASK_UPDATE_URL" \
+      "  $TASK_AGENT_UPDATE_URL" \
       "$self was not changed."
   fi
 
   if [[ ! -s "$tmp" ]]; then
     die "The downloaded update is empty:" \
-      "  $AGENT_TASK_UPDATE_URL" \
+      "  $TASK_AGENT_UPDATE_URL" \
       "$self was not changed."
   fi
 
@@ -115,5 +115,5 @@ selfupdate_run() {
 
   trap - EXIT
 
-  success "Updated agent-task from $AGENT_TASK_UPDATE_URL"
+  success "Updated task-agent from $TASK_AGENT_UPDATE_URL"
 }

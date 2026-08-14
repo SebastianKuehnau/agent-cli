@@ -24,7 +24,7 @@ else
   readonly AGENT_C_RED=""
 fi
 
-readonly AGENT_LOG_PREFIX="[agent-task]"
+readonly AGENT_LOG_PREFIX="[task-agent]"
 
 info() {
   printf '%s%s%s %s\n' "$AGENT_C_DIM" "$AGENT_LOG_PREFIX" "$AGENT_C_RESET" "$*" >&2

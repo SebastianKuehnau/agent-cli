@@ -25,27 +25,34 @@ jobs:
       # against a version that was never published.
       - name: Verify the tag matches the declared version
         run: |
-          declared="$(bash -c 'source lib/version.sh; printf "%s" "$AGENT_TASK_VERSION"')"
+          declared="$(bash -c 'source lib/version.sh; printf "%s" "$TASK_AGENT_VERSION"')"
           if [[ "v$declared" != "$GITHUB_REF_NAME" ]]; then
             printf 'Tag %s does not match lib/version.sh (v%s).\n' \
               "$GITHUB_REF_NAME" "$declared" >&2
-            printf 'Bump AGENT_TASK_VERSION and re-tag.\n' >&2
+            printf 'Bump TASK_AGENT_VERSION and re-tag.\n' >&2
             exit 1
           fi
 
       - name: Build the single-file bundle
-        run: scripts/build-bundle.sh > agent-task
+        run: scripts/build-bundle.sh > task-agent
 
       - name: ShellCheck the built bundle
-        run: shellcheck -x -s bash agent-task
+        run: shellcheck -x -s bash task-agent
 
       - name: Make the bundle executable
-        run: chmod +x agent-task
+        run: chmod +x task-agent
+
+      # The tool was called agent-task until v0.2.0 (issue #8), and installs
+      # from before then look for an asset of that name. Publishing an identical
+      # copy under the old name is what lets them update themselves onto the
+      # renamed tool instead of hitting a 404.
+      - name: Publish the same bundle under the pre-rename asset name
+        run: cp task-agent agent-task
 
       - name: Create the release
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" agent-task \
+          gh release create "${GITHUB_REF_NAME}" task-agent agent-task \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# End-to-end orchestration of `agent-task <branch>` over a real git repository
+# End-to-end orchestration of `task-agent <branch>` over a real git repository
 # and a fake `sbx`. This covers the create-then-reuse contract: running the same
 # command twice must reuse the branch, the worktree and the sandbox.
 
@@ -22,7 +22,7 @@ setup() {
 
 task() {
   run --separate-stderr bash -c \
-    "cd '$REPO' && '$AGENT_TASK' $(printf '%q ' "$@")"
+    "cd '$REPO' && '$TASK_AGENT' $(printf '%q ' "$@")"
 }
 
 expected_sandbox() {
@@ -177,7 +177,7 @@ arg:run"
 
 # --- changed Sandbox Kit (issue #7) -----------------------------------------
 
-# kit_digest — the digest agent-task computes for the project's current kit.
+# kit_digest — the digest task-agent computes for the project's current kit.
 kit_digest() {
   bash -c "source '$AGENT_LIB/logging.sh'
     source '$AGENT_LIB/naming.sh'
@@ -276,7 +276,7 @@ arg:$REPO/.sbx/kit"
 }
 
 @test "a sandbox whose applied kit is unknown gets the current kit applied" {
-  # The state a sandbox created by an older agent-task is in, and the state a
+  # The state a sandbox created by an older task-agent is in, and the state a
   # lost cache entry leaves behind: the kit in there cannot be known, so apply.
   task feature/new-crud
   assert_success
@@ -382,7 +382,7 @@ arg:$REPO/.sbx/kit"
 @test "running from a subdirectory works" {
   mkdir -p "$REPO/src/main/java"
   run --separate-stderr bash -c \
-    "cd '$REPO/src/main/java' && '$AGENT_TASK' feature/new-crud"
+    "cd '$REPO/src/main/java' && '$TASK_AGENT' feature/new-crud"
   assert_success
 
   local wt
@@ -396,7 +396,7 @@ arg:$REPO/.sbx/kit"
   local wt
   wt="$(expected_worktree feature/new-crud)"
 
-  run --separate-stderr bash -c "cd '$wt' && '$AGENT_TASK' feature/new-crud"
+  run --separate-stderr bash -c "cd '$wt' && '$TASK_AGENT' feature/new-crud"
   assert_success
   [[ "$stderr" == *"Reusing sandbox"* ]] || fail "sandbox not reused: $stderr"
   assert_equal "$(grep -c '^arg:create$' "$FAKE_SBX_DIR/calls.log")" "1"
@@ -423,7 +423,7 @@ arg:$REPO/.sbx/kit"
   printf 'schemaVersion: "2"\n' >"$spacey/.sbx/kit/spec.yaml"
 
   run --separate-stderr bash -c \
-    "cd '$spacey' && '$AGENT_TASK' feature/new-crud"
+    "cd '$spacey' && '$TASK_AGENT' feature/new-crud"
   assert_success
 
   # The worktree path with spaces reached sbx as a single argument.
@@ -444,7 +444,7 @@ arg:$REPO/.sbx/kit"
   ln -s "$REPO" "$TMP/link-to-repo"
 
   run --separate-stderr bash -c \
-    "cd '$TMP/link-to-repo' && '$AGENT_TASK' feature/new-crud"
+    "cd '$TMP/link-to-repo' && '$TASK_AGENT' feature/new-crud"
   assert_success
 
   local wt
@@ -509,7 +509,7 @@ arg:$REPO/.sbx/kit"
 
 @test "a sandbox creation failure is reported and not silently ignored" {
   run --separate-stderr env FAKE_SBX_EXIT=1 bash -c \
-    "cd '$REPO' && '$AGENT_TASK' feature/new-crud"
+    "cd '$REPO' && '$TASK_AGENT' feature/new-crud"
   assert_failure
   [[ "$stderr" == *"Failed to create the sandbox"* ]] ||
     fail "unexpected stderr: $stderr"
@@ -544,7 +544,7 @@ arg:$REPO/.sbx/kit"
 
 @test "the sandbox and worktree are still discovered with the cache deleted" {
   # The cache is a cache: removing it may cost a kit re-application, but must
-  # not change what agent-task concludes exists.
+  # not change what task-agent concludes exists.
   task feature/new-crud
   assert_success
   rm -rf "$REPO/.git/agent-cli"

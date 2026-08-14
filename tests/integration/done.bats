@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# End-to-end `agent-task --done <branch>` over a real git repository and a
+# End-to-end `task-agent --done <branch>` over a real git repository and a
 # fake `sbx`. Mirrors session.bats' setup so a session can be started and then
 # torn down within the same test.
 
@@ -21,7 +21,7 @@ setup() {
 
 task() {
   run --separate-stderr bash -c \
-    "cd '$REPO' && '$AGENT_TASK' $(printf '%q ' "$@")"
+    "cd '$REPO' && '$TASK_AGENT' $(printf '%q ' "$@")"
 }
 
 expected_worktree() {
@@ -178,7 +178,7 @@ expected_sandbox() {
 @test "--done outside a git repository fails" {
   local outside="$TMP/not-a-repo"
   mkdir -p "$outside"
-  run --separate-stderr bash -c "cd '$outside' && '$AGENT_TASK' --done feature/x"
+  run --separate-stderr bash -c "cd '$outside' && '$TASK_AGENT' --done feature/x"
   assert_failure
   [[ "$stderr" == *"Not inside a git repository"* ]] ||
     fail "unexpected stderr: $stderr"

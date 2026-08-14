@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Tests for `agent-task --update` / lib/selfupdate.sh.
+# Tests for `task-agent --update` / lib/selfupdate.sh.
 #
 # Both URLs involved — the release asset and the "what is the latest version"
 # probe — are redirected to local file:// URLs, which curl handles natively, so
@@ -17,16 +17,16 @@ setup() {
   TMP="$(make_tmpdir)"
   INSTALL_DIR="$TMP/install"
   mkdir -p "$INSTALL_DIR"
-  SELF="$INSTALL_DIR/agent-task"
+  SELF="$INSTALL_DIR/task-agent"
   printf '#!/usr/bin/env bash\n# old version\n' >"$SELF"
   chmod +x "$SELF"
 
-  FIXTURE="$TMP/new-agent-task"
+  FIXTURE="$TMP/new-task-agent"
   printf '#!/usr/bin/env bash\n# new version\n' >"$FIXTURE"
 
   # The version this install reports, straight from the source of truth.
   INSTALLED_VERSION="$(bash -c \
-    "source '$AGENT_LIB/version.sh'; printf '%s' \"\$AGENT_TASK_VERSION\"")"
+    "source '$AGENT_LIB/version.sh'; printf '%s' \"\$TASK_AGENT_VERSION\"")"
 
   # Fake redirect targets: .../releases/tag/<tag>
   mkdir -p "$TMP/releases/tag"
@@ -47,8 +47,8 @@ setup() {
 # tests that are only about the download itself.
 update_with_url() {
   run --separate-stderr env \
-    AGENT_TASK_UPDATE_URL="$1" \
-    AGENT_TASK_LATEST_URL="${2:-$UNRESOLVABLE_URL}" \
+    TASK_AGENT_UPDATE_URL="$1" \
+    TASK_AGENT_LATEST_URL="${2:-$UNRESOLVABLE_URL}" \
     bash -c "
       source '$AGENT_LIB/version.sh'
       source '$AGENT_LIB/logging.sh'
@@ -59,13 +59,41 @@ update_with_url() {
 
 # latest_version_from <latest-url>
 latest_version_from() {
-  run --separate-stderr env AGENT_TASK_LATEST_URL="$1" \
+  run --separate-stderr env TASK_AGENT_LATEST_URL="$1" \
     bash -c "
       source '$AGENT_LIB/version.sh'
       source '$AGENT_LIB/logging.sh'
       source '$AGENT_LIB/selfupdate.sh'
       selfupdate_latest_version
     "
+}
+
+# --- default URLs -----------------------------------------------------------
+
+@test "the default asset is the renamed one" {
+  # Releases publish both task-agent and, for pre-rename installs, agent-task.
+  # This install must ask for the current name (issue #8).
+  run bash -c "
+    source '$AGENT_LIB/version.sh'
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/selfupdate.sh'
+    printf '%s' \"\$TASK_AGENT_UPDATE_URL\"
+  "
+  assert_success
+  assert_equal "$output" \
+    "https://github.com/SebastianKuehnau/agent-cli/releases/latest/download/task-agent"
+}
+
+@test "the default version probe URL is the latest-release redirect" {
+  run bash -c "
+    source '$AGENT_LIB/version.sh'
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/selfupdate.sh'
+    printf '%s' \"\$TASK_AGENT_LATEST_URL\"
+  "
+  assert_success
+  assert_equal "$output" \
+    "https://github.com/SebastianKuehnau/agent-cli/releases/latest"
 }
 
 # --- version probe ----------------------------------------------------------
@@ -159,7 +187,7 @@ latest_version_from() {
   update_with_url "file://$FIXTURE"
   assert_success
   local leftovers
-  leftovers="$(find "$INSTALL_DIR" -name '.agent-task.*' | wc -l | tr -d ' ')"
+  leftovers="$(find "$INSTALL_DIR" -name '.task-agent.*' | wc -l | tr -d ' ')"
   assert_equal "$leftovers" "0"
 }
 
@@ -179,7 +207,7 @@ latest_version_from() {
   update_with_url "file://$TMP/does-not-exist"
   assert_failure
   local leftovers
-  leftovers="$(find "$INSTALL_DIR" -name '.agent-task.*' 2>/dev/null | wc -l | tr -d ' ')"
+  leftovers="$(find "$INSTALL_DIR" -name '.task-agent.*' 2>/dev/null | wc -l | tr -d ' ')"
   assert_equal "$leftovers" "0"
 }
 
@@ -196,9 +224,9 @@ latest_version_from() {
 
 # --- optional network test --------------------------------------------------
 
-@test "the real release URLs are reachable (AGENT_TASK_NETWORK_TESTS=1)" {
-  [[ -n "${AGENT_TASK_NETWORK_TESTS:-}" ]] ||
-    skip "set AGENT_TASK_NETWORK_TESTS=1 to test against the real URLs"
+@test "the real release URLs are reachable (TASK_AGENT_NETWORK_TESTS=1)" {
+  [[ -n "${TASK_AGENT_NETWORK_TESTS:-}" ]] ||
+    skip "set TASK_AGENT_NETWORK_TESTS=1 to test against the real URLs"
 
   # The version probe must resolve to something version-shaped. This asserts
   # on the probe rather than on a full selfupdate_run, so that the test stays
@@ -215,6 +243,6 @@ latest_version_from() {
 
   # And the asset itself must exist for that release.
   run curl --fail --silent --head --location --output /dev/null \
-    "https://github.com/SebastianKuehnau/agent-cli/releases/latest/download/agent-task"
+    "https://github.com/SebastianKuehnau/agent-cli/releases/latest/download/task-agent"
   assert_success
 }
