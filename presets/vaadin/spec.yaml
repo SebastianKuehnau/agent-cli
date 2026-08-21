@@ -2,7 +2,7 @@ schemaVersion: "2"
 kind: mixin
 name: __PROJECT__
 displayName: __PROJECT__ Vaadin dev environment
-description:
+description: >-
   Vaadin skills and MCP, Maven/Vaadin/GitHub network access, Playwright browsers,
   and access to an Ollama running on the host.
 
