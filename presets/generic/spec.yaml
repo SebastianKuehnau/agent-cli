@@ -1,0 +1,57 @@
+schemaVersion: "2"
+kind: mixin
+name: __PROJECT__
+displayName: __PROJECT__ dev environment
+description: JDK toolchain and Maven/GitHub network access.
+
+# __PROJECT__ is substituted with the project's directory name by
+# `task-agent --init`. It is cosmetic: the kit name shows up in
+# `sbx kit inspect`, while per-sandbox policy rules are labelled from the
+# sandbox name instead.
+#
+# This is the starting point, not the destination. It is deliberately small:
+# add what your project needs and delete what it does not. The base image
+# (docker/sandbox-templates:claude-code) already ships OpenJDK 25, Node, npm,
+# Python and a Docker daemon, so most projects need no install step at all.
+#
+# To install something anyway, uncomment and adapt — `user: "1000"` runs as the
+# `agent` user, which has passwordless sudo for system packages:
+#
+# setup:
+#   install:
+#     - command: "sudo apt-get update && sudo apt-get install -y protobuf-compiler"
+#       user: "1000"
+
+environment:
+  variables:
+    # The base image leaves JAVA_HOME unset even though it ships a JDK. This is
+    # the Debian-conventional symlink, chosen over the versioned directory
+    # (/usr/lib/jvm/java-25-openjdk-arm64) because that one names both the JDK
+    # version and the CPU architecture.
+    JAVA_HOME: "/usr/lib/jvm/default-java"
+
+permissions:
+  network:
+    allow:
+      # Maven. The base image has a JDK but no `mvn`; a project carrying the
+      # Maven wrapper downloads Maven itself from here on first use.
+      - repo.maven.apache.org
+      - repo1.maven.org
+      - central.sonatype.com
+
+      # git clone/fetch over HTTPS, plus release and raw-file downloads.
+      - github.com
+      - codeload.github.com
+      - raw.githubusercontent.com
+
+# Services running on your host are NOT reachable as `localhost` — inside the
+# sandbox that is the sandbox itself. Use `host.docker.internal`, and allow the
+# port with the loopback name, which the proxy normalises:
+#
+# environment:
+#   variables:
+#     OLLAMA_HOST: "http://host.docker.internal:11434"
+# permissions:
+#   network:
+#     allow:
+#       - localhost:11434

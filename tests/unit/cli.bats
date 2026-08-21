@@ -172,10 +172,20 @@ cli() {
     fail "unexpected stderr: $stderr"
 }
 
-@test "--init with a branch name is rejected" {
+@test "--init's positional argument is a preset, so a branch name is rejected" {
+  # --init used to reject every positional argument. It now takes one: a preset
+  # name. A branch name is not one, so it still fails — with the message that
+  # says what the argument is actually for.
   cli --init feature/x
   assert_failure
-  [[ "$stderr" == *"--init does not take a branch name"* ]] ||
+  [[ "$stderr" == *"Unknown preset: feature/x"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--init with two positional arguments is rejected" {
+  cli --init generic vaadin
+  assert_failure
+  [[ "$stderr" == *"Unexpected extra argument: vaadin"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 

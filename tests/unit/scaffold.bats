@@ -216,9 +216,242 @@ init_with_url() {
   assert_success
 }
 
+# --- presets ----------------------------------------------------------------
+#
+# TASK_AGENT_PRESET_BASE_URL is redirected at a local directory laid out the way
+# the publishing repository is, so preset *resolution* is exercised without
+# network. TASK_AGENT_KIT_URL must be unset for these: it deliberately wins over
+# any preset.
+
+# make_preset_base — build a local stand-in for the preset publishing repo.
+#
+# The `generic` stand-in deliberately carries no __PROJECT__ sentinel, so the
+# byte-for-byte assertion below tests something: a spec that does not opt in is
+# copied untouched. The shipped presets both use the sentinel, which is asserted
+# separately at the bottom of this file.
+make_preset_base() {
+  BASE="$TMP/preset-base"
+  mkdir -p "$BASE/presets/generic" "$BASE/presets/vaadin"
+  printf 'schemaVersion: "2"\nkind: mixin\nname: generic-marker\n' \
+    >"$BASE/presets/generic/spec.yaml"
+  printf 'schemaVersion: "2"\nkind: mixin\nname: __PROJECT__\ndisplayName: __PROJECT__ env\n' \
+    >"$BASE/presets/vaadin/spec.yaml"
+}
+
+# init_preset <dir> [preset...] — run --init against the local preset base.
+init_preset() {
+  local dir="$1"
+  shift
+  run --separate-stderr env \
+    -u TASK_AGENT_KIT_URL \
+    TASK_AGENT_PRESET_BASE_URL="file://$BASE" \
+    bash -c "cd '$dir' && '$TASK_AGENT' --init $*"
+}
+
+@test "--init with no preset resolves the generic preset" {
+  make_preset_base
+  init_preset "$REPO"
+  assert_success
+  grep -q 'name: generic-marker' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "did not get the generic preset: $(cat "$REPO/.sbx/kit/spec.yaml")"
+  [[ "$stderr" == *"'generic' preset"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "--init vaadin resolves the vaadin preset" {
+  make_preset_base
+  init_preset "$REPO" vaadin
+  assert_success
+  grep -q 'displayName: my-app env' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "did not get the vaadin preset: $(cat "$REPO/.sbx/kit/spec.yaml")"
+  [[ "$stderr" == *"'vaadin' preset"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "an unknown preset fails, names the known ones, and creates nothing" {
+  make_preset_base
+  init_preset "$REPO" nosuchpreset
+  assert_failure
+  [[ "$stderr" == *"Unknown preset: nosuchpreset"* ]] ||
+    fail "unexpected stderr: $stderr"
+  [[ "$stderr" == *"generic"* && "$stderr" == *"vaadin"* ]] ||
+    fail "error does not list the available presets: $stderr"
+  assert_file_not_exists "$REPO/.sbx/kit/spec.yaml"
+}
+
+@test "an unknown preset creates no .sbx directory at all" {
+  # An unknown preset is an argument error, so it must be caught before the
+  # project is touched — not leave an empty .sbx/kit behind.
+  make_preset_base
+  init_preset "$REPO" nosuchpreset
+  assert_failure
+  assert_file_not_exists "$REPO/.sbx"
+}
+
+@test "an unknown preset leaves an already-present kit directory untouched" {
+  make_preset_base
+  mkdir -p "$REPO/.sbx/kit"
+  printf 'notes\n' >"$REPO/.sbx/kit/README.md"
+
+  init_preset "$REPO" nosuchpreset
+  assert_failure
+  assert_file_exists "$REPO/.sbx/kit/README.md"
+  local leftovers
+  leftovers="$(find "$REPO/.sbx/kit" -name '.spec.yaml.*' 2>/dev/null | wc -l | tr -d ' ')"
+  assert_equal "$leftovers" "0"
+}
+
+# --- the __PROJECT__ placeholder --------------------------------------------
+
+@test "__PROJECT__ is replaced with the project directory name" {
+  make_preset_base
+  init_preset "$REPO" vaadin
+  assert_success
+  grep -q '^name: my-app$' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "placeholder not substituted: $(cat "$REPO/.sbx/kit/spec.yaml")"
+  ! grep -q '__PROJECT__' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "placeholder survived: $(cat "$REPO/.sbx/kit/spec.yaml")"
+}
+
+@test "every __PROJECT__ occurrence is replaced, not just the first" {
+  make_preset_base
+  init_preset "$REPO" vaadin
+  assert_success
+  local count
+  count="$(grep -c 'my-app' "$REPO/.sbx/kit/spec.yaml")"
+  assert_equal "$count" "2"
+}
+
+@test "a project name needing slugification is slugified" {
+  make_preset_base
+  local spacey="$TMP/My Vaadin App"
+  make_repo "$spacey" >/dev/null
+  init_preset "$spacey" vaadin
+  assert_success
+  grep -q '^name: my-vaadin-app$' "$spacey/.sbx/kit/spec.yaml" ||
+    fail "unexpected name: $(cat "$spacey/.sbx/kit/spec.yaml")"
+}
+
+@test "a preset without the placeholder is copied byte for byte" {
+  make_preset_base
+  init_preset "$REPO"
+  assert_success
+  run diff "$BASE/presets/generic/spec.yaml" "$REPO/.sbx/kit/spec.yaml"
+  assert_success
+}
+
+# --- precedence and interaction ---------------------------------------------
+
+@test "TASK_AGENT_KIT_URL wins over an explicitly named preset, and warns" {
+  make_preset_base
+  run --separate-stderr env \
+    TASK_AGENT_KIT_URL="file://$FIXTURE" \
+    TASK_AGENT_PRESET_BASE_URL="file://$BASE" \
+    bash -c "cd '$REPO' && '$TASK_AGENT' --init vaadin"
+  assert_success
+  run diff "$FIXTURE" "$REPO/.sbx/kit/spec.yaml"
+  assert_success
+}
+
+@test "the override warning names the ignored preset" {
+  make_preset_base
+  run --separate-stderr env \
+    TASK_AGENT_KIT_URL="file://$FIXTURE" \
+    TASK_AGENT_PRESET_BASE_URL="file://$BASE" \
+    bash -c "cd '$REPO' && '$TASK_AGENT' --init vaadin"
+  assert_success
+  [[ "$stderr" == *"ignoring the 'vaadin' preset"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "TASK_AGENT_KIT_URL without a preset warns about nothing" {
+  make_preset_base
+  init_in "$REPO"
+  assert_success
+  [[ "$stderr" != *"ignoring"* ]] || fail "unexpected warning: $stderr"
+}
+
+@test "--base is still rejected when a preset is given" {
+  make_preset_base
+  init_preset "$REPO" "vaadin --base main"
+  assert_failure
+  [[ "$stderr" == *"--base is not valid with --init"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "two presets are rejected" {
+  make_preset_base
+  init_preset "$REPO" "generic vaadin"
+  assert_failure
+  [[ "$stderr" == *"Unexpected extra argument"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "the vaadin preset points at the licence section of the README" {
+  make_preset_base
+  init_preset "$REPO" vaadin
+  assert_success
+  [[ "$stderr" == *"licence"* && "$stderr" == *"README"* ]] ||
+    fail "no licence pointer: $stderr"
+}
+
+@test "the generic preset prints no licence pointer" {
+  make_preset_base
+  init_preset "$REPO"
+  assert_success
+  [[ "$stderr" != *"licence"* ]] || fail "unexpected licence note: $stderr"
+}
+
+# --- the shipped presets ----------------------------------------------------
+#
+# presets/<name>/spec.yaml in this repo IS what gets downloaded: the default
+# TASK_AGENT_PRESET_BASE_URL points at this repository, so the authored file and
+# the published file are the same file. These guard the contract those files have
+# with the code above.
+
+@test "every preset named by scaffold_preset_url exists in this repo" {
+  local root="${AGENT_LIB%/lib}" name
+  for name in generic vaadin; do
+    assert_file_exists "$root/presets/$name/spec.yaml"
+  done
+}
+
+@test "every shipped preset uses the __PROJECT__ placeholder as its name" {
+  local root="${AGENT_LIB%/lib}" name
+  for name in generic vaadin; do
+    grep -q '^name: __PROJECT__$' "$root/presets/$name/spec.yaml" ||
+      fail "preset '$name' does not use the placeholder as its name"
+  done
+}
+
+@test "every shipped preset declares schema version 2" {
+  local root="${AGENT_LIB%/lib}" name
+  for name in generic vaadin; do
+    grep -q '^schemaVersion: "2"$' "$root/presets/$name/spec.yaml" ||
+      fail "preset '$name' is not schema version 2"
+  done
+}
+
+@test "the generic preset carries no Vaadin-specific configuration" {
+  # The kit --init used to download was Vaadin-specific despite being the
+  # default. `generic` must stay generic; Vaadin is an explicit --init vaadin.
+  local shipped="${AGENT_LIB%/lib}/presets/generic/spec.yaml"
+  ! grep -qi 'vaadin' "$shipped" ||
+    fail "the generic preset mentions Vaadin: $(grep -i vaadin "$shipped")"
+}
+
+@test "the preset base URL points at this repository" {
+  run bash -c "
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/scaffold.sh'
+    printf '%s' \"\$TASK_AGENT_PRESET_BASE_URL\"
+  "
+  assert_success
+  [[ "$output" == *"/agent-cli/"* ]] ||
+    fail "presets are not published from this repository: $output"
+}
+
 # --- optional network test --------------------------------------------------
 
-@test "the real kit URL is reachable and non-empty (TASK_AGENT_NETWORK_TESTS=1)" {
+@test "the real generic preset URL is reachable and non-empty (TASK_AGENT_NETWORK_TESTS=1)" {
   [[ -n "${TASK_AGENT_NETWORK_TESTS:-}" ]] ||
     skip "set TASK_AGENT_NETWORK_TESTS=1 to test against the real URL"
 
@@ -228,4 +461,16 @@ init_with_url() {
   [[ -s "$REPO/.sbx/kit/spec.yaml" ]] || fail "downloaded spec.yaml is empty"
   grep -q 'schemaVersion' "$REPO/.sbx/kit/spec.yaml" ||
     fail "downloaded spec.yaml does not look like a kit spec"
+}
+
+@test "the real vaadin preset URL is reachable and substituted (TASK_AGENT_NETWORK_TESTS=1)" {
+  # Presets are published from this repository's default branch, so this test
+  # fails until the preset files are pushed there.
+  [[ -n "${TASK_AGENT_NETWORK_TESTS:-}" ]] ||
+    skip "set TASK_AGENT_NETWORK_TESTS=1 to test against the real URL"
+
+  run --separate-stderr bash -c "cd '$REPO' && '$TASK_AGENT' --init vaadin"
+  assert_success
+  grep -q '^name: my-app$' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "unexpected name: $(grep '^name:' "$REPO/.sbx/kit/spec.yaml")"
 }
