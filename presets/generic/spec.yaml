@@ -1,0 +1,45 @@
+schemaVersion: "2"
+kind: mixin
+name: __PROJECT__
+displayName: __PROJECT__ dev environment
+description: JDK toolchain and Maven/GitHub network access.
+
+# __PROJECT__ is set by `task-agent --init`. Cosmetic: only shows in `sbx kit inspect`.
+# Deliberately small — add what you need, delete what you don't.
+
+# The base image already has JDK 25, Node, npm, Python and Docker. To add more:
+#
+# setup:
+#   install:
+#     - command: "sudo apt-get update && sudo apt-get install -y protobuf-compiler"
+#       user: "1000"
+
+environment:
+  variables:
+    # Base image ships a JDK but leaves JAVA_HOME unset. Symlink, not the
+    # versioned dir, which names both JDK version and CPU architecture.
+    JAVA_HOME: "/usr/lib/jvm/default-java"
+
+permissions:
+  network:
+    allow:
+      # Maven. No `mvn` in the image; the wrapper downloads it from here.
+      - repo.maven.apache.org
+      - repo1.maven.org
+      - central.sonatype.com
+
+      # git over HTTPS, releases, raw files.
+      - github.com
+      - codeload.github.com
+      - raw.githubusercontent.com
+
+# Host services are NOT `localhost` — that's the sandbox itself. Reach them at
+# `host.docker.internal`, but allow the port under the loopback name:
+#
+# environment:
+#   variables:
+#     OLLAMA_HOST: "http://host.docker.internal:11434"
+# permissions:
+#   network:
+#     allow:
+#       - localhost:11434

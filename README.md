@@ -57,14 +57,20 @@ mv ~/.local/bin/agent-task ~/.local/bin/task-agent
 
 ```
 Usage:
-  task-agent --init
+  task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
   task-agent --done <branch>
   task-agent --update
   task-agent --version
 
 Commands:
-  --init        Download the Docker Sandbox Kit into the current project.
+  --init        Download the Docker Sandbox Kit into the current project,
+                starting from <preset>. Default: generic.
+                  generic   JAVA_HOME, Maven/GitHub network access.
+                  vaadin    generic, plus Vaadin skills and MCP, Playwright,
+                            and access to a host Ollama.
+                The kit is a starting value: it is yours to edit afterwards,
+                and a later change to the preset does not affect it.
   <branch>      Create or reuse the branch, its worktree and its sandbox,
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
@@ -94,6 +100,89 @@ This downloads a Sandbox Kit to `.sbx/kit/spec.yaml` and does nothing else — i
 spec to describe your project's toolchain and network policy, then commit it.
 
 An existing `.sbx/kit/spec.yaml` is never overwritten.
+
+#### Presets
+
+`--init` takes an optional preset, which decides what the kit starts out containing:
+
+```bash
+task-agent --init            # generic (the default)
+task-agent --init vaadin
+```
+
+| Preset | Contains |
+| --- | --- |
+| `generic` | `JAVA_HOME`, Maven and GitHub network access. Deliberately small. |
+| `vaadin` | the above, plus the Vaadin skills and MCP, Playwright browsers, and access to an Ollama running on the host |
+
+The presets themselves live in this repository under
+[`presets/`](presets/) and are downloaded from its default branch, so the file you read is the file
+`--init` hands out.
+
+> **Changed in this version.** `--init` previously downloaded a single kit from a separate repository,
+> and that kit was Vaadin-specific even though it was the default. `generic` is now genuinely generic;
+> use `--init vaadin` for the Vaadin one.
+
+A preset is a **starting value, not a dependency**. `--init` writes a copy that your project then owns;
+nothing reads the preset again afterwards, so a preset edited upstream never changes a project that was
+already initialised from it. Delete whatever you do not need — dropping the Playwright install step
+from the `vaadin` kit is three lines.
+
+Presets do not compose: `vaadin` contains Playwright rather than being combined with a `playwright`
+preset. See [ADR 0001](docs/adr/0001-presets-as-url-lookup-not-kit-composition.md) for why.
+
+`TASK_AGENT_KIT_URL` still takes precedence over any preset, so you can start from a spec of your own:
+
+```bash
+TASK_AGENT_KIT_URL=https://example.com/my-kit.yaml task-agent --init
+```
+
+If a preset uses the `__PROJECT__` placeholder, `--init` replaces it with your project's directory
+name. A spec without the placeholder is copied byte for byte.
+
+#### Vaadin licence in the sandbox
+
+Vaadin Pro components and TestBench need a licence, and **`task-agent` does not deliver one**. This
+section records what was measured against `sbx` v0.39.0 so you do not have to rediscover it.
+
+The two Vaadin licence kinds behave differently, and that decides everything:
+
+| Kind | Validated | Needs to be *inside* the sandbox? |
+| --- | --- | --- |
+| `proKey` (development builds) | online, interactively via your Vaadin account | — interactive login is a non-starter in a sandbox |
+| `offlineKey` / `offlineKeyV2` (production builds) | locally, against a signature | **yes** |
+
+Vaadin's own [licence documentation](https://vaadin.com/docs/latest/flow/configuration/licenses) names
+the offline key as the container answer: place the file in the build's home directory, or pass it via
+the `vaadin.offlineKey` system property or the `VAADIN_OFFLINE_KEY` environment variable.
+
+Three things that do **not** work, each verified:
+
+- **`sbx secret set-custom`** delivers a *placeholder* to the sandbox, not the secret. Its own output
+  says `Generated placeholder: sbx-cs-…`; the real value is substituted by the proxy into outbound
+  request headers. An offline key is checked locally, so there is no request to rewrite and the
+  placeholder fails the signature check.
+- **Kit `environment.variables` do not interpolate.** A kit declaring `${VAADIN_OFFLINE_KEY}` delivers
+  the literal string `${VAADIN_OFFLINE_KEY}`. Putting the real value in the kit means committing it.
+- **`sbx setup`** imports secrets only for the built-in agent services, not arbitrary ones.
+
+So today the options are to run the sandbox's build without commercial features, or to publish the key
+into the sandbox yourself with `sbx create --env` outside `task-agent`. Adding a `--env` passthrough to
+`task-agent` is a deliberate non-decision — see
+[ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).
+
+#### Ports
+
+A kit cannot publish ports; the kit schema has no `ports` field. Publish them on the running sandbox:
+
+```bash
+sbx ls                                        # find the sandbox name
+sbx ports agent-my-app-feature-x-a1b2c3 --publish 8080
+```
+
+Inside the sandbox, `localhost` is the sandbox itself. Services on your **host** are reachable as
+`host.docker.internal`, and the network rule for them is written with the loopback name — a rule for
+`localhost:11434` is what makes `host.docker.internal:11434` reachable.
 
 ### Updating the Sandbox Kit
 

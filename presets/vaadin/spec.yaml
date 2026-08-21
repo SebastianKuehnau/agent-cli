@@ -1,0 +1,56 @@
+schemaVersion: "2"
+kind: mixin
+name: __PROJECT__
+displayName: __PROJECT__ Vaadin dev environment
+description: >-
+  Vaadin skills and MCP, Maven/Vaadin/GitHub network access, Playwright browsers,
+  and access to an Ollama running on the host.
+
+# __PROJECT__ is set by `task-agent --init vaadin`. Cosmetic: only shows in `sbx kit inspect`.
+
+setup:
+  install:
+    # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
+    - command: "claude plugin marketplace add vaadin/agent-marketplace && claude plugin install vaadin-skills@vaadin-marketplace"
+      user: "1000"
+
+    # No browsers in the image. `--with-deps` needs root; `agent` has passwordless sudo.
+    # Drop this step if the project has no browser tests.
+    - command: "sudo npx --yes playwright install --with-deps chromium"
+      user: "1000"
+
+environment:
+  variables:
+    # `localhost` is the sandbox itself; only host.docker.internal reaches the host.
+    OLLAMA_HOST: "http://host.docker.internal:11434"
+    OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+
+    # Base image ships a JDK but leaves JAVA_HOME unset. Symlink, not the
+    # versioned dir, which names both JDK version and CPU architecture.
+    JAVA_HOME: "/usr/lib/jvm/default-java"
+
+permissions:
+  network:
+    allow:
+      # Maven. No `mvn` in the image; the wrapper downloads it from here.
+      - repo.maven.apache.org
+      - repo1.maven.org
+      - central.sonatype.com
+
+      # Claude plugin marketplace and install.
+      - github.com
+      - codeload.github.com
+      - raw.githubusercontent.com
+
+      # Vaadin docs, MCP, Javadoc.
+      - vaadin.com
+      - mcp.vaadin.com
+      - www.javadocs.dev
+
+      # Playwright browsers: primary host plus the installer's fallback.
+      - cdn.playwright.dev
+      - playwright.download.prss.microsoft.com
+
+      # Host Ollama. Loopback name on purpose: the proxy normalises it, so this
+      # is what makes host.docker.internal:11434 reachable.
+      - localhost:11434
