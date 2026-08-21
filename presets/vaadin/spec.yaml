@@ -2,7 +2,7 @@ schemaVersion: "2"
 kind: mixin
 name: __PROJECT__
 displayName: __PROJECT__ Vaadin dev environment
-description: >-
+description:
   Vaadin skills and MCP, Maven/Vaadin/GitHub network access, Playwright browsers,
   and access to an Ollama running on the host.
 
@@ -21,10 +21,6 @@ setup:
 
 environment:
   variables:
-    # `localhost` is the sandbox itself; only host.docker.internal reaches the host.
-    OLLAMA_HOST: "http://host.docker.internal:11434"
-    OLLAMA_BASE_URL: "http://host.docker.internal:11434"
-
     # Base image ships a JDK but leaves JAVA_HOME unset. Symlink, not the
     # versioned dir, which names both JDK version and CPU architecture.
     JAVA_HOME: "/usr/lib/jvm/default-java"
@@ -50,7 +46,3 @@ permissions:
       # Playwright browsers: primary host plus the installer's fallback.
       - cdn.playwright.dev
       - playwright.download.prss.microsoft.com
-
-      # Host Ollama. Loopback name on purpose: the proxy normalises it, so this
-      # is what makes host.docker.internal:11434 reachable.
-      - localhost:11434
