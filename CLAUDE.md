@@ -53,7 +53,7 @@ lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a c
 lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
-                         artifact `.github/workflows/release.yml` publishes; not runtime code
+                         artifact `.github/workflows/publish.yml` publishes; not runtime code
 tests/               bats suite (see below)
 ```
 
@@ -190,7 +190,7 @@ a user who wants to override git's own refusal can already do so directly with
 module unit-testable. `scripts/build-bundle.sh` is a release-time build step, not a second
 implementation: it concatenates the lib files and `bin/task-agent` (minus its `source
 "$AGENT_LIB_DIR/..."` lines) into one self-contained file with no text surgery beyond dropping those
-lines. `.github/workflows/release.yml` runs it on every `v*` tag push and publishes the result as
+lines. `.github/workflows/publish.yml` runs it for every release and publishes the result as
 that release's `task-agent` asset — plus an identical copy named `agent-task`, because installs from
 before the rename look for that asset name and would otherwise get a 404 from `--update` instead of
 the release that renames the tool. Keep publishing both.
@@ -329,9 +329,10 @@ problem, and note it would require a `-t` passthrough, which "Scope discipline" 
 release bundle has no repository to ask, and asking git would make an installed bundle's version
 depend on whichever directory it was run from.
 
-`.github/workflows/release.yml` refuses to publish a tag that does not match `TASK_AGENT_VERSION`.
+`.github/workflows/publish.yml` refuses to publish a tag that does not match `TASK_AGENT_VERSION`.
 That check is load-bearing, not hygiene — it is the only thing that makes a version comparison
-against the latest release mean anything. Bump the constant in the commit you tag.
+against the latest release mean anything. The constant belongs in the commit that is tagged, which is
+why `prepare-release.yml` writes it and tags it in one step — see "How a release is cut" below.
 
 `selfupdate_latest_version` (`lib/selfupdate.sh`) resolves the latest released version from where
 `https://github.com/<repo>/releases/latest` **redirects** to (`…/releases/tag/vX.Y.Z`), read off
@@ -348,6 +349,42 @@ Two decisions in `selfupdate_run` worth keeping:
   Refusing would turn any hiccup in the probe into a broken `--update`, whereas an unnecessary
   download is merely wasteful — and an offline machine fails at the download with its own clear
   message regardless. Do not "fix" this into a hard failure.
+
+## How a release is cut
+
+Run **Prepare release** from the Actions tab and pick `patch`, `minor` or `major`. That is the whole
+procedure; nothing is edited or tagged by hand.
+
+Three workflow files, and the split between them is deliberate:
+
+- `prepare-release.yml` (`workflow_dispatch`) — runs CI, computes the next version from
+  `lib/version.sh`, rewrites the constant, commits, tags, and pushes branch and tag with
+  `git push --atomic`. Then it calls `publish.yml`.
+- `publish.yml` (`workflow_call`, input `tag`) — checks out **the tag**, verifies it against
+  `TASK_AGENT_VERSION`, builds the bundle and creates the release with both assets.
+- `release.yml` (`on: push` of `v*`) — a thin caller of `publish.yml` for a tag pushed by hand, which
+  stays supported.
+
+Four things about this are load-bearing.
+
+**The version is computed, never typed.** `patch`/`minor`/`major` is applied to what `lib/version.sh`
+declares, and an existing tag is refused. A release can therefore neither skip a number nor reuse one.
+
+**The bump and the tag are one act, pushed atomically.** Separating them is what produced v0.3.1
+through v0.3.3 (issue #16): three tags on commits declaring a different version, each refused by the
+version guard, so no release was built at all while `--update` kept resolving v0.3.0. `--atomic` means
+a tag can never arrive without the commit that declares its version.
+
+**`prepare-release.yml` publishes inside its own run.** GitHub does not trigger `on: push` workflows
+for pushes made with the default `GITHUB_TOKEN`, so its tag push does *not* start `release.yml`. That
+is why publishing lives in a reusable workflow both callers share rather than in `release.yml` — a
+second copy of the build is exactly how the two paths would drift. Do not "simplify" this by inlining
+the build, and do not add a PAT to make the tag push trigger: a token with write access, kept fresh by
+hand, is a worse dependency than one `uses:` line.
+
+**The version guard in `publish.yml` stays, even though `prepare-release.yml` cannot violate it.**
+Hand-tagging remains possible, and the guard is the only reason `--update`'s "already the latest
+release" is trustworthy.
 
 ## Agent skills
 

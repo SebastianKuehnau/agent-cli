@@ -1,0 +1,132 @@
+name: Prepare release
+
+# Cut a release from the Actions tab: test, bump, tag, publish — one run.
+#
+# The manual route it replaces was three separate acts (edit lib/version.sh,
+# commit, tag, push), and that is what produced v0.3.1 through v0.3.3: tags on
+# commits that declared a different version, refused by publish.yml's version
+# guard, so no release was ever built (issue #16). Here the bump and the tag are
+# the same step and are pushed atomically, so they cannot disagree.
+#
+# The version is computed from lib/version.sh rather than typed, so a release
+# can neither skip a number nor reuse one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: Which part of X.Y.Z to increase.
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+permissions:
+  contents: read
+
+jobs:
+  # The same suite CI runs on every push, at the commit about to be tagged.
+  # Nothing is bumped or tagged unless this passes.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  prepare:
+    name: Bump and tag
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+
+    steps:
+      # workflow_dispatch can be started from any branch. A release built from a
+      # side branch would put a tag on a commit that is not on main, so the
+      # version constant in main's history would never name it.
+      - name: Refuse to release from anywhere but main
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            printf 'Releases are cut from main only, not from %s.\n' \
+              "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      # Full history and tags: the next version has to be checked against the
+      # tags that already exist.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Work out the next version, bump it, and tag it
+        id: bump
+        env:
+          LEVEL: ${{ inputs.level }}
+        run: |
+          set -euo pipefail
+
+          current="$(bash -c 'source lib/version.sh; printf "%s" "$TASK_AGENT_VERSION"')"
+          if [[ ! "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            printf 'lib/version.sh does not declare an X.Y.Z version: %s\n' \
+              "$current" >&2
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+
+          case "$LEVEL" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) printf 'Unknown level: %s\n' "$LEVEL" >&2; exit 1 ;;
+          esac
+          next="$major.$minor.$patch"
+          tag="v$next"
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            printf 'Tag %s already exists.\n' "$tag" >&2
+            printf 'Delete it, or release a different level.\n' >&2
+            exit 1
+          fi
+
+          sed -i -E \
+            "s/^readonly TASK_AGENT_VERSION=\"[0-9]+\.[0-9]+\.[0-9]+\"\$/readonly TASK_AGENT_VERSION=\"$next\"/" \
+            lib/version.sh
+
+          # A sed that matched nothing would leave the old version in place and
+          # the tag would then be refused downstream, one job too late to be
+          # obvious. Read the value back instead of trusting the substitution.
+          declared="$(bash -c 'source lib/version.sh; printf "%s" "$TASK_AGENT_VERSION"')"
+          if [[ "$declared" != "$next" ]]; then
+            printf 'Bump failed: lib/version.sh still declares %s, wanted %s.\n' \
+              "$declared" "$next" >&2
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/version.sh
+          git commit -m "Release $tag"
+          git tag -a "$tag" -m "$tag"
+
+          # --atomic: the branch and the tag move together or not at all. A tag
+          # without its bump commit is the failure mode this whole workflow
+          # exists to remove.
+          git push --atomic origin "HEAD:$GITHUB_REF" "refs/tags/$tag"
+
+          printf 'tag=%s\n' "$tag" >>"$GITHUB_OUTPUT"
+          printf 'Tagged %s (was %s).\n' "$tag" "$current"
+
+  # Same workflow release.yml uses for a hand-pushed tag. It cannot be triggered
+  # by the tag push above — GitHub does not trigger workflows from pushes made
+  # with the default token — so it is called here directly.
+  publish:
+    needs: prepare
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    permissions:
+      contents: write

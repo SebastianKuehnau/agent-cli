@@ -1,0 +1,84 @@
+name: Publish
+
+# The one place a release is built and published. Both routes to a release go
+# through here: release.yml, when a v* tag is pushed by hand, and
+# prepare-release.yml, which bumps, tags and publishes in a single run.
+#
+# Publishing lives in a reusable workflow rather than in either caller because a
+# tag pushed by a workflow using the default GITHUB_TOKEN does not trigger
+# `on: push` — GitHub suppresses that to prevent workflow loops — so
+# prepare-release.yml has to publish inside its own run. Duplicating the build
+# there is exactly how the two would drift apart.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to build and publish, e.g. v0.3.4.
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-24.04
+
+    steps:
+      # The tag, not the caller's ref: prepare-release.yml calls this from the
+      # default branch, and what gets published must be the tagged commit.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # A release named vX.Y.Z must contain a bundle that reports X.Y.Z,
+      # otherwise `--update`'s "already the latest release" check compares
+      # against a version that was never published.
+      #
+      # This is also the guard that refused v0.3.1 through v0.3.3 (issue #16):
+      # each of those tags sat on a commit that declared a different version, so
+      # nothing was published at all. prepare-release.yml exists so the bump and
+      # the tag can no longer be separate acts — but the guard stays, because a
+      # hand-pushed tag still can.
+      - name: Verify the tag matches the declared version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          declared="$(bash -c 'source lib/version.sh; printf "%s" "$TASK_AGENT_VERSION"')"
+          if [[ "v$declared" != "$TAG" ]]; then
+            printf 'Tag %s does not match lib/version.sh (v%s).\n' \
+              "$TAG" "$declared" >&2
+            printf 'Bump TASK_AGENT_VERSION and re-tag.\n' >&2
+            exit 1
+          fi
+
+      - name: Build the single-file bundle
+        run: scripts/build-bundle.sh > task-agent
+
+      - name: ShellCheck the built bundle
+        run: shellcheck -x -s bash task-agent
+
+      - name: Make the bundle executable
+        run: chmod +x task-agent
+
+      # The tool was called agent-task until v0.2.0 (issue #8), and installs
+      # from before then look for an asset of that name. Publishing an identical
+      # copy under the old name is what lets them update themselves onto the
+      # renamed tool instead of hitting a 404.
+      - name: Publish the same bundle under the pre-rename asset name
+        run: cp task-agent agent-task
+
+      - name: Create the release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$TAG" task-agent agent-task \
+            --title "$TAG" \
+            --generate-notes
