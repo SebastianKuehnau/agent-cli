@@ -18,4 +18,4 @@ fi
 AGENT_VERSION_SH_LOADED=1
 
 # shellcheck disable=SC2034  # read by bin/task-agent and lib/selfupdate.sh.
-readonly TASK_AGENT_VERSION="0.3.2"
+readonly TASK_AGENT_VERSION="0.3.3"
