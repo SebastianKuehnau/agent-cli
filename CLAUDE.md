@@ -13,6 +13,11 @@ original scaffold and is not used by the build or the tests.
 are in the Phase 1 exclusion list under "Scope discipline" below. Everything else in that list still
 applies.
 
+`--init` gained an optional **preset** argument by a further explicit decision — see "How presets
+work" below. That decision covers the preset argument and nothing else: it is not licence to start
+forwarding `sbx` options. `task-agent` passes none, deliberately
+(`docs/adr/0002-ports-and-env-stay-outside-task-agent.md`).
+
 The command was renamed from `agent-task` to `task-agent` in v0.2.0 (issue #8). The rename covers the
 executable, the `TASK_AGENT_*` environment overrides, the `[task-agent]` log prefix and the release
 asset. It deliberately stops there: the repository is still `agent-cli`, the internal `AGENT_*`
@@ -42,7 +47,8 @@ lib/naming.sh        pure naming functions: slug, short hash, worktree/sandbox/p
 lib/git.sh           repo checks, main-root resolution, branch validation/detection/creation
 lib/worktree.sh      worktree path derivation, registered-worktree lookup, create-or-reuse/remove
 lib/sandbox.sh       sbx presence, existence check, argv construction, execution
-lib/scaffold.sh      `--init` and the kit digest: create .sbx/kit, download spec.yaml atomically
+lib/scaffold.sh      `--init`, the preset table and the kit digest: create .sbx/kit, download
+                     spec.yaml atomically, substitute the __PROJECT__ placeholder
 lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a cache, not state)
 lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
@@ -159,8 +165,10 @@ one (issue #6). Still not implemented, and not to be added without a further exp
 `--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--force`, `--rebuild`; pull requests and
 GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
-`docker run`; project configuration files; and any generic `runtime_*` abstraction (Docker Sandboxes is
-the only runtime, and a one-implementation interface is unverifiable).
+`docker run`; project configuration files (`.sbxenv.yaml` included); custom template images; **any
+`sbx` option passthrough** (`--publish`, `--env`, `--env-file`, `--memory`, `--cpus`, `--template`,
+`--static-mcp`); and any generic `runtime_*` abstraction (Docker Sandboxes is the only runtime, and a
+one-implementation interface is unverifiable).
 
 ## How `--done` tears down a task
 
@@ -261,6 +269,59 @@ sandbox of the same name already has that kit.
 itself when sbx is unavailable. A green `tests/run-tests.sh` therefore says nothing about whether
 Docker Sandboxes still behaves as described above.
 
+## How presets work
+
+`--init [PRESET]` decides what the project kit starts out containing. A preset is a **name that
+resolves to a URL** — the table is `scaffold_preset_url` in `lib/scaffold.sh` — and `--init` downloads
+that one file, exactly as it always did. `TASK_AGENT_KIT_URL` still wins over any preset, and warns
+when it silently overrides an explicitly named one.
+
+Three things about this are load-bearing.
+
+**Presets are published from this repository, and every one of them lives at
+`presets/<name>/spec.yaml`.** `TASK_AGENT_PRESET_BASE_URL` defaults to this repo's raw default branch,
+so the authored file and the downloaded file are the same file — there is no copy step and nothing can
+drift. `presets/` is therefore not sample material: editing a file in it changes what `--init` hands
+out, on the next push, for every installed version.
+
+`--init` used to download from a separate repository (`claude-sandboxed`, since renamed to
+`vaadin-claude-sandbox`, now being retired) whose kit was **Vaadin-specific despite being the only,
+default kit**. `generic` is a new file and is genuinely generic; Vaadin is `--init vaadin`. A test
+asserts `presets/generic/spec.yaml` never mentions Vaadin again.
+
+**Kit composition does not exist, so presets do not compose.** The kit schema accepts a `mixins:` field
+and `sbx kit validate` warns that the runtime does not apply it. agent-cli therefore passes exactly one
+`--kit`, and a combined environment is one preset containing everything rather than two composed ones.
+The full reasoning, including why layering would have broken the single-tree kit digest, is in
+`docs/adr/0001-presets-as-url-lookup-not-kit-composition.md`. Do not reintroduce `mixins` without
+re-running that validation first.
+
+**The `__PROJECT__` substitution is opt-in and byte-preserving.** `scaffold_init` replaces the sentinel
+only when the downloaded spec actually contains it, so a spec without it is moved into place untouched
+— which is what keeps `--init` a byte-for-byte copy for every spec that does not ask for otherwise. The
+replacement value comes from `naming_project_id`, whose output is `[a-z0-9-]` only; that is what makes a
+plain `sed "s///"` safe here with no quoting. The substitution is **cosmetic**: the kit name shows up in
+`sbx kit inspect`, while per-sandbox policy rules are labelled from the *sandbox* name, so a wrong kit
+name changes no behaviour.
+
+`tests/unit/scaffold.bats` guards the contract between the shipped presets and the code: every name in
+`scaffold_preset_url` must have a file, every file must use the sentinel and declare schema version 2,
+and `TASK_AGENT_PRESET_BASE_URL` must point at this repository. Add a preset by adding both the table
+entry and the file — the test fails if you add only one.
+
+## No custom template image
+
+agent-cli passes no `-t`, and there is no Dockerfile here. That is a measured decision, not an
+omission: `docker/sandbox-templates:claude-code` already ships OpenJDK 25.0.3, Node 22, npm, Python
+3.14, a Docker daemon, and passwordless `sudo` for the `agent` user. `mvn` is absent, but Vaadin
+projects carry the Maven wrapper and `repo.maven.apache.org` is in the kit's allowlist. SDKMAN is
+absent, so a `sdk install java …` line in a kit is dead code — it cannot work, and `|| true` only hides
+that.
+
+The one thing genuinely missing is browser binaries, which is why the `vaadin` preset installs them at
+setup time instead. Reach for a custom image only when that download cost per sandbox becomes the
+problem, and note it would require a `-t` passthrough, which "Scope discipline" forbids.
+
 ## How the version and `--update`'s version check work
 
 `lib/version.sh`'s `TASK_AGENT_VERSION` is the only place the version is written down, and
@@ -296,4 +357,6 @@ Issues live in GitHub Issues (`SebastianKuehnau/agent-cli`), via the `gh` CLI. S
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (not yet created). See `docs/agents/domain.md`.
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. `CONTEXT.md` is the glossary — in
+particular it separates **template** (an image), **kit**, **project kit** and **preset**, which are
+easy to confuse. See `docs/agents/domain.md`.
