@@ -4,6 +4,22 @@
 # `status`, `output` and `stderr` are set by bats' own `run`.
 # shellcheck disable=SC2154
 
+# No terminal on stdin, ever (issue #14).
+#
+# bats inherits stdin from whoever started it, so a suite run from a terminal
+# hands that terminal to task-agent — and anything that asks (`confirm` in
+# lib/logging.sh, reached when a changed Sandbox Kit is found in the default
+# TASK_AGENT_KIT_RECREATE=ask mode) then blocks in `read` until the developer
+# types something. Under CI, where stdin is not a tty, the same tests pass.
+#
+# The suite must not depend on which of the two it is running under, so stdin is
+# neutralised here, once, for every test file: this is loaded from `setup`, which
+# bats runs in the same shell as the test body, so every command a test starts
+# inherits /dev/null. Tests that want to exercise a prompt must feed it
+# explicitly (see tests/unit/logging.bats), and the non-interactive way to say
+# yes is TASK_AGENT_KIT_RECREATE=yes.
+exec 0</dev/null
+
 # Repository under test.
 AGENT_REPO_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export AGENT_REPO_ROOT

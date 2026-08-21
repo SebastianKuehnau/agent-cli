@@ -148,6 +148,13 @@ Conventions:
   string.
 - Tests that depend on the developer's environment must neutralise it — e.g. pass
   `-c core.excludesFile=/dev/null` when asserting on `git status`.
+- **stdin is neutralised for the whole suite**, in `tests/helpers/common.bash` (issue #14). bats hands
+  a test the terminal it was started from, so without this a suite run from a terminal blocks in
+  `confirm` the moment a test reaches the changed-kit prompt, while the same test passes in CI. No
+  test may therefore rely on inheriting a terminal: exercise a prompt by feeding it explicitly (see
+  `tests/unit/logging.bats`), and drive the recreate path with `TASK_AGENT_KIT_RECREATE=yes`.
+  Reproducing the hang needs a pty that stays open — `script` closes its master side, so `read` gets
+  EOF and the test passes.
 - **Fixture paths are canonicalised by `make_tmpdir`.** On macOS `mktemp -d` returns `/var/folders/…`,
   which is a symlink to `/private/var/folders/…`, while git reports the physical path. Never build a
   fixture path that bypasses `make_tmpdir`. To reproduce the macOS condition on Linux:

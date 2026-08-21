@@ -179,9 +179,12 @@ arg:run"
 #
 # Applying a changed kit means recreating the sandbox: `sbx kit add` cannot
 # express "this kit changed" (see tests/spike/sandbox-kit.bats). Because that is
-# destructive to container-only state, the default is to ask — and bats runs with
-# no terminal on stdin, so the default here is "do not touch it", which is
-# exactly the non-interactive behaviour being asserted below.
+# destructive to container-only state, the default is to ask — and the suite
+# neutralises stdin (tests/helpers/common.bash), so the default here is "do not
+# touch it", which is exactly the non-interactive behaviour being asserted below.
+# That neutralisation is what these tests rely on, not anything bats does by
+# itself: bats passes on the terminal it was started from, and without it the
+# tests below would sit at the prompt forever (issue #14).
 
 # kit_digest — the digest task-agent computes for the project's current kit.
 kit_digest() {
