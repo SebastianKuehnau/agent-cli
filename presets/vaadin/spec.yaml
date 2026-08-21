@@ -6,66 +6,51 @@ description: >-
   Vaadin skills and MCP, Maven/Vaadin/GitHub network access, Playwright browsers,
   and access to an Ollama running on the host.
 
-# __PROJECT__ is substituted with the project's directory name by
-# `task-agent --init vaadin`. It is cosmetic: the kit name shows up in
-# `sbx kit inspect`, while per-sandbox policy rules are labelled from the
-# sandbox name instead.
+# __PROJECT__ is set by `task-agent --init vaadin`. Cosmetic: only shows in `sbx kit inspect`.
 
 setup:
   install:
-    # Brings both the Vaadin skills and the Vaadin MCP server: inside the
-    # sandbox this registers as `plugin:vaadin-skills:vaadin` pointing at
-    # https://mcp.vaadin.com/docs. No `sbx mcp add` is needed for it.
+    # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
     - command: "claude plugin marketplace add vaadin/agent-marketplace && claude plugin install vaadin-skills@vaadin-marketplace"
       user: "1000"
 
-    # The base image ships Node and npm but no browsers. `--with-deps` installs
-    # system libraries, hence sudo — the `agent` user is in the sudo group with
-    # no password. Drop this step if the project has no browser tests.
+    # No browsers in the image. `--with-deps` needs root; `agent` has passwordless sudo.
+    # Drop this step if the project has no browser tests.
     - command: "sudo npx --yes playwright install --with-deps chromium"
       user: "1000"
 
 environment:
   variables:
-    # Inside the sandbox, `localhost` is the sandbox itself. Host services are
-    # reachable as `host.docker.internal` — verified against a host Ollama:
-    # localhost:11434 and 127.0.0.1:11434 do not connect, while
-    # host.docker.internal:11434 does.
+    # `localhost` is the sandbox itself; only host.docker.internal reaches the host.
     OLLAMA_HOST: "http://host.docker.internal:11434"
     OLLAMA_BASE_URL: "http://host.docker.internal:11434"
 
-    # The base image leaves JAVA_HOME unset even though it ships a JDK. This is
-    # the Debian-conventional symlink, chosen over the versioned directory
-    # (/usr/lib/jvm/java-25-openjdk-arm64) because that one names both the JDK
-    # version and the CPU architecture.
+    # Base image ships a JDK but leaves JAVA_HOME unset. Symlink, not the
+    # versioned dir, which names both JDK version and CPU architecture.
     JAVA_HOME: "/usr/lib/jvm/default-java"
 
 permissions:
   network:
     allow:
-      # Maven. The base image has a JDK but no `mvn`; Vaadin projects use the
-      # Maven wrapper, which downloads Maven from here on first use.
+      # Maven. No `mvn` in the image; the wrapper downloads it from here.
       - repo.maven.apache.org
       - repo1.maven.org
       - central.sonatype.com
 
-      # Claude plugin marketplace and plugin install.
+      # Claude plugin marketplace and install.
       - github.com
       - codeload.github.com
       - raw.githubusercontent.com
 
-      # Vaadin docs, MCP and Javadoc.
+      # Vaadin docs, MCP, Javadoc.
       - vaadin.com
       - mcp.vaadin.com
       - www.javadocs.dev
 
-      # Playwright browser downloads: primary host plus the fallback the
-      # installer falls back to when the primary is unreachable.
+      # Playwright browsers: primary host plus the installer's fallback.
       - cdn.playwright.dev
       - playwright.download.prss.microsoft.com
 
-      # Ollama on the host. Written as `localhost:11434` on purpose: the proxy
-      # normalises host-loopback names, so this rule is what makes
-      # host.docker.internal:11434 reachable. Adding an explicit
-      # `host.docker.internal:11434` rule is not necessary.
+      # Host Ollama. Loopback name on purpose: the proxy normalises it, so this
+      # is what makes host.docker.internal:11434 reachable.
       - localhost:11434
