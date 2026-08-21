@@ -287,3 +287,13 @@ Two decisions in `selfupdate_run` worth keeping:
   Refusing would turn any hiccup in the probe into a broken `--update`, whereas an unnecessary
   download is merely wasteful — and an offline machine fails at the download with its own clear
   message regardless. Do not "fix" this into a hard failure.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`SebastianKuehnau/agent-cli`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (not yet created). See `docs/agents/domain.md`.
