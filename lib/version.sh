@@ -6,11 +6,13 @@
 # git would make an installed bundle's version depend on whichever directory it
 # happened to be run from.
 #
-# `.github/workflows/release.yml` refuses to publish a tag that does not match
+# `.github/workflows/publish.yml` refuses to publish a tag that does not match
 # this value, so a release named vX.Y.Z always contains a bundle that reports
 # X.Y.Z — which is what makes `--update`'s version comparison trustworthy.
 #
-# Bump this in the same commit that is tagged.
+# Do not edit this by hand: the "Prepare release" workflow writes it, commits it
+# and tags that commit in one step, which is what keeps the tag and this value
+# from disagreeing (issue #16).
 
 if [[ -n "${AGENT_VERSION_SH_LOADED:-}" ]]; then
   return 0

@@ -6,6 +6,9 @@ on:
     branches:
       - main
   workflow_dispatch:
+  # prepare-release.yml runs this before it bumps anything, so "green" means the
+  # same thing for a release as it does for a push.
+  workflow_call:
 
 permissions:
   contents: read

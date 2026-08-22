@@ -322,14 +322,21 @@ so a green `tests/run-tests.sh` on its own does not mean those assumptions still
 
 ### Releasing
 
-Bump `TASK_AGENT_VERSION` in `lib/version.sh` in the commit you are about to tag, then push the
-matching `v*` tag. That runs `.github/workflows/release.yml`, which refuses a tag that does not match
-the declared version, builds the single-file bundle with `scripts/build-bundle.sh`, and publishes it
-as that release's `task-agent` asset — the exact file `task-agent --update` downloads. `bin/` and
-`lib/` remain the source of truth; the bundle is a release-time build artifact, not something
-committed to the repository.
+Run the **Prepare release** workflow from the Actions tab and choose `patch`, `minor` or `major`.
+That is the whole procedure — nothing is edited or tagged by hand.
 
-The tag check is what makes `--update` trustworthy: a release named `vX.Y.Z` always contains a bundle
+It runs the test suite, works the next version out from `lib/version.sh`, writes the constant back,
+commits, tags, and pushes the commit and the tag together. Then it builds the single-file bundle with
+`scripts/build-bundle.sh` and publishes it as that release's `task-agent` asset — the exact file
+`task-agent --update` downloads. `bin/` and `lib/` remain the source of truth; the bundle is a
+release-time build artifact, not something committed to the repository.
+
+Computing the version instead of accepting one typed in is what makes a release unable to skip or
+reuse a number, and doing the bump and the tag in one atomic push is what keeps them from disagreeing.
+Pushing a `v*` tag by hand still works and publishes through the same steps, but then the tag must sit
+on a commit whose `TASK_AGENT_VERSION` matches it — otherwise the release is refused.
+
+That check is what makes `--update` trustworthy: a release named `vX.Y.Z` always contains a bundle
 that reports `X.Y.Z`, so "already the latest release" can never be a lie.
 
 See [CLAUDE.md](./CLAUDE.md) for the module layout, the architectural rules, and the testing
