@@ -18,6 +18,11 @@ setup() {
   printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
 
   make_fake_sbx "$TMP/fake"
+
+  # Keep the transcript rescue inside the fixture. Without this the suite would
+  # write into the developer's real ~/.claude/projects.
+  CLAUDE_CONFIG_DIR="$TMP/claude"
+  export CLAUDE_CONFIG_DIR
 }
 
 task() {
@@ -207,8 +212,12 @@ change_kit() {
 }
 
 # sbx_subcommands — the sbx subcommands invoked, in order, one per line.
+#
+# `exec` and `cp` are in here so that the transcript rescue's position relative
+# to `rm` is asserted rather than assumed: the whole point is that it happens
+# while the sandbox still exists.
 sbx_subcommands() {
-  grep -E '^arg:(create|rm|run|ls|kit)$' "$FAKE_SBX_DIR/calls.log" || true
+  grep -E '^arg:(create|rm|run|ls|kit|exec|cp)$' "$FAKE_SBX_DIR/calls.log" || true
 }
 
 @test "creating a sandbox records the kit it was created from" {
@@ -268,7 +277,11 @@ arg:run"
   assert_success
   [[ "$stderr" == *"only inside the container is lost"* ]] ||
     fail "consequence not stated: $stderr"
-  [[ "$stderr" == *"session state"* ]] ||
+  # The two halves have to be separated, because the rescue makes them
+  # different: the transcripts survive, the resumable session does not.
+  [[ "$stderr" == *"transcripts are copied to the host"* ]] ||
+    fail "what survives is not named: $stderr"
+  [[ "$stderr" == *"cannot be resumed"* ]] ||
     fail "the loss that actually bites is not named: $stderr"
   [[ "$stderr" == *"not affected"* ]] || fail "worktree safety not stated: $stderr"
 }
@@ -286,6 +299,7 @@ arg:run"
 
   # Removed, recreated, then attached to — in that order.
   assert_equal "$(sbx_subcommands)" "arg:ls
+arg:exec
 arg:rm
 arg:create
 arg:run"
@@ -348,6 +362,7 @@ arg:run"
   unset TASK_AGENT_KIT_RECREATE
   assert_success
   assert_equal "$(sbx_subcommands)" "arg:ls
+arg:exec
 arg:rm
 arg:create
 arg:run"
@@ -413,6 +428,7 @@ arg:run"
   unset TASK_AGENT_KIT_RECREATE
   assert_success
   assert_equal "$(sbx_subcommands)" "arg:ls
+arg:exec
 arg:rm
 arg:create
 arg:run"
@@ -438,6 +454,7 @@ arg:run"
   unset TASK_AGENT_KIT_RECREATE
   assert_success
   assert_equal "$(sbx_subcommands)" "arg:ls
+arg:exec
 arg:rm
 arg:create
 arg:run"

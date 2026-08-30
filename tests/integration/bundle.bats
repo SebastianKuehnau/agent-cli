@@ -22,6 +22,11 @@ setup() {
   chmod +x "$INSTALL_DIR/task-agent"
 
   make_fake_sbx "$TMP/fake"
+
+  # Keep the transcript rescue inside the fixture, not in the developer's own
+  # ~/.claude/projects.
+  CLAUDE_CONFIG_DIR="$TMP/claude"
+  export CLAUDE_CONFIG_DIR
 }
 
 @test "the bundle is syntactically valid bash" {
@@ -70,6 +75,23 @@ setup() {
   run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' --done feature/x"
   assert_success
   [[ "$stderr" == *"was kept"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "the bundle rescues transcripts on --done, with no sibling lib/" {
+  # Proves lib/transcripts.sh made it into the bundle, and early enough in the
+  # concatenation for lib/session.sh to call it.
+  local repo="$TMP/my-app-rescue"
+  make_repo "$repo" >/dev/null
+  mkdir -p "$repo/.sbx/kit"
+  printf 'schemaVersion: "2"\n' >"$repo/.sbx/kit/spec.yaml"
+
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
+  assert_success
+
+  fake_sbx_add_transcript "/home/agent/.claude/projects/-wt-feature-x/abc.jsonl"
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' --done feature/x"
+  assert_success
+  assert_file_exists "$CLAUDE_CONFIG_DIR/projects/-wt-feature-x/abc.jsonl"
 }
 
 @test "the bundle applies a changed Sandbox Kit, with no sibling lib/" {

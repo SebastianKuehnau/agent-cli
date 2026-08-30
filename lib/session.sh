@@ -29,6 +29,10 @@ session_start() {
   git_require_repo
   sandbox_require_cli
 
+  # Validated up front, before anything is created: an invalid setting must
+  # cost a re-run, never a half-built task.
+  transcripts_validate_mode
+
   git_validate_branch "$branch"
   git_validate_branch "$base"
 
@@ -119,6 +123,10 @@ session_sync_kit() {
   session_kit_should_recreate "$sandbox" || return 0
 
   info "Recreating sandbox '$sandbox' from the current Sandbox Kit"
+  # The transcripts live only inside the container, so they have to come out
+  # before it is destroyed. A failure here is reported but never stops the
+  # recreate — see lib/transcripts.sh.
+  transcripts_rescue "$sandbox" || true
   sandbox_remove "$sandbox"
   sandbox_create \
     "$sandbox" \
@@ -154,8 +162,9 @@ session_kit_should_recreate() {
 
   warning "The Sandbox Kit changed since sandbox '$sandbox' was created."
   warning "Applying it recreates that sandbox — Docker Sandboxes has no in-place"
-  warning "kit update — so anything that exists only inside the container is lost,"
-  warning "the agent's session state in there included."
+  warning "kit update — so anything that exists only inside the container is lost."
+  warning "The agent's transcripts are copied to the host first, so they still"
+  warning "reach /insights, but the session itself cannot be resumed afterwards."
   warning "The worktree on the host, its files and its commits are not affected."
 
   if [[ ! -t 0 ]]; then
@@ -199,6 +208,10 @@ session_done() {
   git_require_repo
   sandbox_require_cli
 
+  # Validated up front, before anything is removed: an invalid setting must
+  # cost a re-run, never a half-torn-down task.
+  transcripts_validate_mode
+
   git_validate_branch "$branch"
 
   local main_root
@@ -209,6 +222,10 @@ session_done() {
   sandbox="$(naming_sandbox_name "$project" "$branch")"
 
   if sandbox_exists "$sandbox"; then
+    # Last chance to get the agent's transcripts out: they exist only inside
+    # the container. Deliberately not allowed to abort the teardown — a broken
+    # rescue must never leave an undeletable sandbox behind.
+    transcripts_rescue "$sandbox" || true
     info "Removing sandbox '$sandbox'"
     sandbox_remove "$sandbox"
   else

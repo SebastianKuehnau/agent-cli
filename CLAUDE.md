@@ -13,6 +13,10 @@ original scaffold and is not used by the build or the tests.
 are in the Phase 1 exclusion list under "Scope discipline" below. Everything else in that list still
 applies.
 
+Issue #18 added the transcript rescue. It adds no flag and no argument: it is a step inside the two
+teardown paths that already existed. A standalone `--rescue` was considered and deliberately left out
+— see "Scope discipline".
+
 `--init` gained an optional **preset** argument by a further explicit decision — see "How presets
 work" below. That decision covers the preset argument and nothing else: it is not licence to start
 forwarding `sbx` options. `task-agent` passes none, deliberately
@@ -50,6 +54,8 @@ lib/sandbox.sh       sbx presence, existence check, argv construction, execution
 lib/scaffold.sh      `--init`, the preset table and the kit digest: create .sbx/kit, download
                      spec.yaml atomically, substitute the __PROJECT__ placeholder
 lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a cache, not state)
+lib/transcripts.sh   rescuing the agent's *.jsonl session transcripts out of a sandbox to the
+                     host, immediately before the sandbox is destroyed
 lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
@@ -93,8 +99,16 @@ These are load-bearing. Breaking one of them breaks the tool's core guarantees.
    can be asserted element by element in tests.
 8. **`--clone` is never passed to `sbx`.** It would run the agent on an in-container clone, breaking
    the guarantee that edits and commits are immediately visible on the host.
-9. **agent-cli does not manage Claude authentication.** No `~/.claude` copying, no `ANTHROPIC_API_KEY`
-   forwarding. That is Docker Sandboxes' responsibility.
+9. **agent-cli does not manage Claude authentication.** No copying of credentials into or out of a
+   sandbox, no `ANTHROPIC_API_KEY` forwarding. That is Docker Sandboxes' responsibility.
+
+   The rule targets F32 of the predecessor, which bind-mounted `~/.claude-container/{claude,claude.json}`
+   into the container to carry credentials. It is deliberately about **credentials**, not about
+   `~/.claude` as a directory: rescuing the agent's *transcripts* out of a sandbox before it is
+   destroyed is a separate, permitted concern (`lib/transcripts.sh`, issue #18). It runs in the
+   opposite direction — sandbox to host — copies `*.jsonl` only, and never touches
+   `.credentials.json`. `docs/current-script-analysis.md` lists "Agent auth / history" and
+   "Agent conversation state" as two separate rows for exactly this reason.
 10. **Every path handed to `sbx` must be the *physical* path.** Git canonicalises paths, so a linked
     worktree's `.git` pointer always names a physical path. Mounting a symlinked alias instead puts
     the workspace at a path the pointer does not name, and git inside the sandbox fails with
@@ -169,8 +183,8 @@ Conventions:
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
 (issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — and `--version` by another
 one (issue #6). Still not implemented, and not to be added without a further explicit decision:
-`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--force`, `--rebuild`; pull requests and
-GitHub integration; branch deletion;
+`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--force`, `--rebuild`, `--rescue`; pull requests
+and GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
 `docker run`; project configuration files (`.sbxenv.yaml` included); custom template images; **any
 `sbx` option passthrough** (`--publish`, `--env`, `--env-file`, `--memory`, `--cpus`, `--template`,
@@ -190,6 +204,49 @@ the branch ref keeps them reachable whether or not a worktree for it still exist
 agent-cli-level `--force` for this without an explicit decision (see "Scope discipline" above);
 a user who wants to override git's own refusal can already do so directly with
 `git worktree remove --force`.
+
+## How the agent's transcripts get out of a sandbox
+
+Every sandbox has its own `~/.claude`, so an agent's session transcripts
+(`projects/<slug>/<session-id>.jsonl`) exist only there. Claude Code's `/insights` builds its report
+by scanning the **host's** `$CLAUDE_CONFIG_DIR/projects`, so without help every session run through
+`task-agent` is invisible to it — the sandbox is exactly where the transcripts are, and exactly what
+`--done` deletes.
+
+`lib/transcripts.sh` has one entry point, `transcripts_rescue <sandbox>`, called immediately **before**
+`sandbox_remove` at both places that destroy a sandbox: `session_done` and `session_sync_kit`.
+
+- `sbx exec` runs `find -mindepth 2 -maxdepth 2 -name '*.jsonl'` over
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`. Depth 2 matches `projects/<slug>/<session>.jsonl` and
+  skips the subdirectories (`memory/`, `tool-results/`, subagent transcripts), which `/insights` does
+  not read either. The config directory is resolved **inside** the sandbox, because a kit can set
+  `CLAUDE_CONFIG_DIR` there.
+- One `sbx cp` per file, into a staging directory next to the destination and then `mv` into place.
+  Atomic for the same reason `kit_cache_write` is: a truncated `.jsonl` in the user's
+  `~/.claude/projects` is worse than a missing one, because `/insights` reads whatever is there.
+- The host slug is taken from the in-sandbox path verbatim, never re-derived. It matches anyway —
+  `sbx` mounts every workspace at the same absolute path it has on the host — and re-deriving it would
+  mean reimplementing Claude Code's path slugging.
+
+Four rules hold this together:
+
+1. **A rescue never blocks teardown.** It reports and returns non-zero; both call sites discard that.
+   A broken rescue must never be able to leave an undeletable sandbox behind.
+2. **All projects in the sandbox are rescued, not just the task's own slug.** The agent can work
+   outside its worktree, and those transcripts vanish just the same.
+3. **Every file is copied every time; there is no skip-if-unchanged check.** `sbx rm` destroys the
+   container filesystem, so a recreated sandbox starts with an empty `projects/` and the same
+   transcript is never rescued twice. A size-or-mtime comparison would also rest on `sbx cp`
+   preserving mtime, which `sbx cp --help` does not promise.
+4. **An invalid `TASK_AGENT_RESCUE_TRANSCRIPTS` fails, and fails early.** It is validated at the top of
+   `session_start` and `session_done`, before anything is created or removed, so a typo costs a re-run
+   rather than a half-torn-down task. Values are `yes` (the default) and `no`, matching
+   `TASK_AGENT_KIT_RECREATE`'s vocabulary and its refusal to read a typo as "off".
+
+Why this happens at teardown and not periodically, and why there is no lifecycle event to hook, is in
+[ADR 0003](docs/adr/0003-rescue-transcripts-at-teardown-only.md). That ADR also records the known
+limit: a `sbx prune`, `sbx reset` or `sbx rm` run by hand destroys transcripts without `task-agent`
+ever being involved.
 
 ## How `--update` and the release bundle fit together
 
