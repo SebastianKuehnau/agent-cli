@@ -108,12 +108,14 @@ An existing `.sbx/kit/spec.yaml` is never overwritten.
 ```bash
 task-agent --init            # generic (the default)
 task-agent --init vaadin
+task-agent --init vaadin-claude
 ```
 
 | Preset | Contains |
 | --- | --- |
 | `generic` | `JAVA_HOME`, Maven and GitHub network access. Deliberately small. |
-| `vaadin` | the above, plus the Vaadin skills and MCP, Playwright browsers, and access to an Ollama running on the host |
+| `vaadin` | the above, plus the Vaadin skills and MCP, and Playwright browsers |
+| `vaadin-claude` | the above, plus general engineering skills and a status line showing context-window usage |
 
 The presets themselves live in this repository under
 [`presets/`](presets/) and are downloaded from its default branch, so the file you read is the file
@@ -139,6 +141,35 @@ TASK_AGENT_KIT_URL=https://example.com/my-kit.yaml task-agent --init
 
 If a preset uses the `__PROJECT__` placeholder, `--init` replaces it with your project's directory
 name. A spec without the placeholder is copied byte for byte.
+
+#### Agent configuration in the sandbox
+
+`task-agent` writes no agent configuration — no `.claude/settings.json`, no `CLAUDE.md`, no MCP file.
+Everything the agent needs inside a sandbox comes from the kit, which is why the `vaadin-claude`
+preset exists (see [ADR 0003](docs/adr/0003-agent-configuration-lives-in-the-preset-kit.md)). Its
+`setup.install` steps do three things:
+
+- install the Vaadin skills and MCP (`vaadin-skills@vaadin-marketplace`);
+- install general engineering skills — tdd, code review, bug diagnosis and so on
+  (`mattpocock-skills@claude-plugins-official`);
+- write `~/.claude/statusline.sh` and configure it as Claude Code's status line, so every prompt
+  shows the model and how much of the context window is used:
+
+  ```
+  Opus 5 [####------] 42%
+  ```
+
+Two details are load-bearing if you edit that step:
+
+- `~/.claude/settings.json` is seeded by Docker Sandboxes, so the step **merges** into it with `jq`
+  rather than writing it. Overwriting it throws away what sbx put there.
+- `~/.claude/skills` is a **read-write mount of your host's** skills directory. Never write into it
+  from a kit: the file would land on your machine, not in the sandbox. Skills belong in plugins,
+  which are container-local.
+
+The kit is yours once `--init` has copied it: deleting the status-line step, or moving it into a
+kit that started from `generic`, is an ordinary edit. A changed kit reaches an existing sandbox only
+by recreating it, which `task-agent <branch>` offers to do.
 
 #### Vaadin licence in the sandbox
 

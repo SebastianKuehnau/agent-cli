@@ -231,11 +231,14 @@ init_with_url() {
 # separately at the bottom of this file.
 make_preset_base() {
   BASE="$TMP/preset-base"
-  mkdir -p "$BASE/presets/generic" "$BASE/presets/vaadin"
+  mkdir -p "$BASE/presets/generic" "$BASE/presets/vaadin" \
+    "$BASE/presets/vaadin-claude"
   printf 'schemaVersion: "2"\nkind: mixin\nname: generic-marker\n' \
     >"$BASE/presets/generic/spec.yaml"
   printf 'schemaVersion: "2"\nkind: mixin\nname: __PROJECT__\ndisplayName: __PROJECT__ env\n' \
     >"$BASE/presets/vaadin/spec.yaml"
+  printf 'schemaVersion: "2"\nkind: mixin\nname: __PROJECT__\ndisplayName: __PROJECT__ claude\n' \
+    >"$BASE/presets/vaadin-claude/spec.yaml"
 }
 
 # init_preset <dir> [preset...] — run --init against the local preset base.
@@ -266,13 +269,23 @@ init_preset() {
   [[ "$stderr" == *"'vaadin' preset"* ]] || fail "unexpected stderr: $stderr"
 }
 
+@test "--init vaadin-claude resolves the vaadin-claude preset" {
+  make_preset_base
+  init_preset "$REPO" vaadin-claude
+  assert_success
+  grep -q 'displayName: my-app claude' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "did not get the vaadin-claude preset: $(cat "$REPO/.sbx/kit/spec.yaml")"
+  [[ "$stderr" == *"'vaadin-claude' preset"* ]] || fail "unexpected stderr: $stderr"
+}
+
 @test "an unknown preset fails, names the known ones, and creates nothing" {
   make_preset_base
   init_preset "$REPO" nosuchpreset
   assert_failure
   [[ "$stderr" == *"Unknown preset: nosuchpreset"* ]] ||
     fail "unexpected stderr: $stderr"
-  [[ "$stderr" == *"generic"* && "$stderr" == *"vaadin"* ]] ||
+  [[ "$stderr" == *"generic"* && "$stderr" == *"vaadin"* &&
+    "$stderr" == *"vaadin-claude"* ]] ||
     fail "error does not list the available presets: $stderr"
   assert_file_not_exists "$REPO/.sbx/kit/spec.yaml"
 }
@@ -393,6 +406,14 @@ init_preset() {
     fail "no licence pointer: $stderr"
 }
 
+@test "the vaadin-claude preset points at the licence section of the README" {
+  make_preset_base
+  init_preset "$REPO" vaadin-claude
+  assert_success
+  [[ "$stderr" == *"licence"* && "$stderr" == *"README"* ]] ||
+    fail "no licence pointer: $stderr"
+}
+
 @test "the generic preset prints no licence pointer" {
   make_preset_base
   init_preset "$REPO"
@@ -409,14 +430,14 @@ init_preset() {
 
 @test "every preset named by scaffold_preset_url exists in this repo" {
   local root="${AGENT_LIB%/lib}" name
-  for name in generic vaadin; do
+  for name in generic vaadin vaadin-claude; do
     assert_file_exists "$root/presets/$name/spec.yaml"
   done
 }
 
 @test "every shipped preset uses the __PROJECT__ placeholder as its name" {
   local root="${AGENT_LIB%/lib}" name
-  for name in generic vaadin; do
+  for name in generic vaadin vaadin-claude; do
     grep -q '^name: __PROJECT__$' "$root/presets/$name/spec.yaml" ||
       fail "preset '$name' does not use the placeholder as its name"
   done
@@ -424,7 +445,7 @@ init_preset() {
 
 @test "every shipped preset declares schema version 2" {
   local root="${AGENT_LIB%/lib}" name
-  for name in generic vaadin; do
+  for name in generic vaadin vaadin-claude; do
     grep -q '^schemaVersion: "2"$' "$root/presets/$name/spec.yaml" ||
       fail "preset '$name' is not schema version 2"
   done
@@ -473,4 +494,59 @@ init_preset() {
   assert_success
   grep -q '^name: my-app$' "$REPO/.sbx/kit/spec.yaml" ||
     fail "unexpected name: $(grep '^name:' "$REPO/.sbx/kit/spec.yaml")"
+}
+
+@test "the real vaadin-claude preset URL is reachable and substituted (TASK_AGENT_NETWORK_TESTS=1)" {
+  # Presets are published from this repository's default branch, so this test
+  # fails until the preset files are pushed there.
+  [[ -n "${TASK_AGENT_NETWORK_TESTS:-}" ]] ||
+    skip "set TASK_AGENT_NETWORK_TESTS=1 to test against the real URL"
+
+  run --separate-stderr bash -c "cd '$REPO' && '$TASK_AGENT' --init vaadin-claude"
+  assert_success
+  grep -q '^name: my-app$' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "unexpected name: $(grep '^name:' "$REPO/.sbx/kit/spec.yaml")"
+}
+
+# --- the vaadin-claude preset's agent configuration -------------------------
+#
+# This preset is the only place agent configuration lives: task-agent itself
+# never writes any (docs/adr/0003-agent-configuration-lives-in-the-preset-kit.md).
+# These guard the two properties of that setup step that are not obvious from
+# reading it, and that would fail silently inside a sandbox.
+
+@test "the vaadin-claude preset configures a status line" {
+  local shipped="${AGENT_LIB%/lib}/presets/vaadin-claude/spec.yaml"
+  grep -q 'statusLine' "$shipped" ||
+    fail "the vaadin-claude preset configures no status line"
+  grep -q 'used_percentage' "$shipped" ||
+    fail "the status line does not read the context-window usage"
+}
+
+@test "the vaadin-claude preset merges settings.json rather than replacing it" {
+  # ~/.claude/settings.json is seeded by Docker Sandboxes. Overwriting it would
+  # throw that away, so the step must go through jq.
+  local shipped="${AGENT_LIB%/lib}/presets/vaadin-claude/spec.yaml"
+  grep -q 'jq --arg cmd' "$shipped" ||
+    fail "the vaadin-claude preset does not merge settings.json with jq"
+  ! grep -q "cat >.*settings.json" "$shipped" ||
+    fail "the vaadin-claude preset overwrites settings.json"
+}
+
+@test "the vaadin-claude preset never writes into ~/.claude/skills" {
+  # That path is a read-write mount of the *host* skills directory: writing
+  # there would leak sandbox configuration onto the developer's machine.
+  # Comment lines are excluded: the preset explains the hazard in one, and
+  # explaining it is not doing it.
+  local shipped="${AGENT_LIB%/lib}/presets/vaadin-claude/spec.yaml"
+  ! grep -v '^[[:space:]]*#' "$shipped" | grep -q '\.claude/skills' ||
+    fail "the vaadin-claude preset writes into the host's skills directory"
+}
+
+@test "the vaadin-claude preset installs the skill plugins" {
+  local shipped="${AGENT_LIB%/lib}/presets/vaadin-claude/spec.yaml"
+  grep -q 'claude plugin install vaadin-skills@vaadin-marketplace' "$shipped" ||
+    fail "the vaadin-claude preset does not install the Vaadin skills"
+  grep -q 'claude plugin install mattpocock-skills@claude-plugins-official' "$shipped" ||
+    fail "the vaadin-claude preset does not install the general skills"
 }

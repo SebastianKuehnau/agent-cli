@@ -53,9 +53,11 @@ Usage:
 Commands:
   --init        Download the Docker Sandbox Kit into the current project,
                 starting from <preset>. Default: generic.
-                  generic   JAVA_HOME, Maven/GitHub network access.
-                  vaadin    generic, plus Vaadin skills and MCP, Playwright,
-                            and access to a host Ollama.
+                  generic         JAVA_HOME, Maven/GitHub network access.
+                  vaadin          generic, plus the Vaadin skills and MCP,
+                                  and Playwright browsers.
+                  vaadin-claude   vaadin, plus general engineering skills and
+                                  a context-usage status line.
                 The kit is a starting value: it is yours to edit afterwards,
                 and a later change to the preset does not affect it.
   <branch>      Create or reuse the branch, its worktree and its sandbox,

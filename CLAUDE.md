@@ -309,6 +309,36 @@ name changes no behaviour.
 and `TASK_AGENT_PRESET_BASE_URL` must point at this repository. Add a preset by adding both the table
 entry and the file — the test fails if you add only one.
 
+## How agent configuration reaches the sandbox
+
+Skills and Claude Code configuration are **kit content, not a task-agent feature** (issue #20,
+`docs/adr/0003-agent-configuration-lives-in-the-preset-kit.md`). `--init` still writes
+`.sbx/kit/spec.yaml` and nothing else, and the predecessor's `.claude/settings.json` / `.mcp.json` /
+`CLAUDE.md` generation (F55–F57 in `docs/current-script-analysis.md`) stays unimplemented. Do not add
+a flag, a template or a `.claude/` writer for this.
+
+The `vaadin-claude` preset is where the configuration lives: the Vaadin skills plus
+`mattpocock-skills@claude-plugins-official`, and a `setup.install` step that writes
+`~/.claude/statusline.sh` and configures it as the status line. `generic` and `vaadin` stay
+unchanged; presets do not compose, so the combination ships as its own name.
+
+Four facts about the sandbox that the step depends on, all established by inspecting a running one:
+
+- `~/.claude/settings.json` is container-local **and seeded by Docker Sandboxes**, so the step merges
+  into it with `jq`. Writing the file would discard what sbx seeded.
+- `~/.claude/skills` is a **read-write mount of the host's** skills directory. A kit must never write
+  there — it would install onto the developer's machine. Plugins are container-local; skills go
+  through `claude plugin install`.
+- `jq` is in the image. The preset still guards with an apt-get so the step is not silently
+  image-dependent.
+- The status line payload carries `.context_window.used_percentage` (Claude Code 2.1.251).
+
+`tests/unit/scaffold.bats` asserts the shape of the shipped preset — status line present, settings
+merged rather than overwritten, nothing written to `~/.claude/skills`, both plugins installed. Whether
+any of it *works* is only knowable from `tests/spike/sandbox-preset-claude.bats`, which needs a real
+sbx and skips without one. It is also the only check that the kit schema accepts the multi-line
+command; every other shipped `setup.install` command is a one-liner.
+
 ## No custom template image
 
 agent-cli passes no `-t`, and there is no Dockerfile here. That is a measured decision, not an

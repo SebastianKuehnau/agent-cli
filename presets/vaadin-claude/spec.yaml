@@ -1,0 +1,100 @@
+schemaVersion: "2"
+kind: mixin
+name: __PROJECT__
+displayName: __PROJECT__ Vaadin + Claude dev environment
+description: >-
+  The vaadin preset plus agent configuration: the Vaadin and mattpocock skill
+  plugins, and a status line showing the model and context-window usage.
+
+# __PROJECT__ is set by `task-agent --init vaadin-claude`. Cosmetic: only shows
+# in `sbx kit inspect`.
+#
+# This is `vaadin` with the agent's own configuration added. task-agent itself
+# never writes agent configuration (ADR 0003); everything below is
+# ordinary kit setup, so it is yours to edit or delete once --init has copied it.
+
+setup:
+  install:
+    # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
+    - command: "claude plugin marketplace add vaadin/agent-marketplace && claude plugin install vaadin-skills@vaadin-marketplace"
+      user: "1000"
+
+    # General engineering skills: tdd, code-review, diagnosing-bugs, ...
+    - command: "claude plugin marketplace add anthropics/claude-plugins-official && claude plugin install mattpocock-skills@claude-plugins-official"
+      user: "1000"
+
+    # No browsers in the image. `--with-deps` needs root; `agent` has passwordless sudo.
+    # Drop this step if the project has no browser tests.
+    - command: "sudo npx --yes playwright install --with-deps chromium"
+      user: "1000"
+
+    # Status line: "<model> [####------] 42%" — the model and how much of the
+    # context window is used. Written here rather than by task-agent, which does
+    # not manage agent configuration.
+    #
+    # ~/.claude/settings.json is container-local and seeded by Docker Sandboxes,
+    # so this step *merges* into it and never overwrites it. ~/.claude/skills, by
+    # contrast, is a read-write mount of the host directory — never write there.
+    - command: |
+        set -e
+        if ! command -v jq >/dev/null 2>&1; then
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq
+        fi
+        mkdir -p "$HOME/.claude"
+        cat >"$HOME/.claude/statusline.sh" <<'SH'
+        #!/bin/bash
+        input=$(cat)
+        model=$(echo "$input" | jq -r '.model.display_name')
+        used=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
+        used_int=$(printf '%.0f' "$used")
+        bar_width=10
+        filled=$(( used_int * bar_width / 100 ))
+        if [ "$filled" -gt "$bar_width" ]; then filled=$bar_width; fi
+        empty=$(( bar_width - filled ))
+        bar=""
+        for ((i=0; i<filled; i++)); do bar="${bar}#"; done
+        for ((i=0; i<empty; i++)); do bar="${bar}-"; done
+        printf "\033[2m%s [%s] %s%%\033[0m" "$model" "$bar" "$used_int"
+        SH
+        chmod +x "$HOME/.claude/statusline.sh"
+        settings="$HOME/.claude/settings.json"
+        [ -s "$settings" ] || printf '{}\n' >"$settings"
+        tmp="$(mktemp)"
+        # The enabledPlugins lines are belt and braces: `claude plugin install`
+        # normally sets them, and setting them again is a no-op.
+        jq --arg cmd "$HOME/.claude/statusline.sh" '
+          .statusLine = {type: "command", command: $cmd}
+          | .enabledPlugins["vaadin-skills@vaadin-marketplace"] = true
+          | .enabledPlugins["mattpocock-skills@claude-plugins-official"] = true
+        ' "$settings" >"$tmp"
+        mv "$tmp" "$settings"
+      user: "1000"
+
+environment:
+  variables:
+    # Base image ships a JDK but leaves JAVA_HOME unset. Symlink, not the
+    # versioned dir, which names both JDK version and CPU architecture.
+    JAVA_HOME: "/usr/lib/jvm/default-java"
+
+permissions:
+  network:
+    allow:
+      # Maven. No `mvn` in the image; the wrapper downloads it from here.
+      - repo.maven.apache.org
+      - repo1.maven.org
+      - central.sonatype.com
+
+      # Claude plugin marketplaces and installs.
+      - github.com
+      - codeload.github.com
+      - raw.githubusercontent.com
+
+      # Vaadin docs, MCP, Javadoc.
+      - vaadin.com
+      - mcp.vaadin.com
+      - www.javadocs.dev
+
+      # Playwright browsers: primary host plus the installer's fallback.
+      - cdn.playwright.dev
+      - playwright.download.prss.microsoft.com
