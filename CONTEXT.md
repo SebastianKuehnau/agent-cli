@@ -19,6 +19,16 @@ the host.
 
 **Agent** — the AI coding tool running inside the sandbox. Currently always Claude Code.
 
+**Transcript** — the record of one agent session, belonging to the agent rather than to agent-cli. It
+is written inside the sandbox and is therefore destroyed with it, unlike anything in the worktree.
+The analysis Claude Code offers over a developer's sessions reads transcripts on the developer's own
+machine, which is why a transcript that never leaves its sandbox counts as lost even though the work
+it describes was committed.
+
+**Transcript Rescue** — copying a task's transcripts out of its sandbox to the host before the sandbox
+is destroyed. It is the last step of a task's life rather than an ongoing sync, and it never blocks the
+teardown it precedes. See [ADR 0003](docs/adr/0003-rescue-transcripts-at-teardown-only.md).
+
 ## Sandbox configuration
 
 These four terms are easy to confuse. The distinction matters because each one can express things the

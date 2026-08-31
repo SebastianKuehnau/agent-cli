@@ -17,6 +17,11 @@ setup() {
   printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
 
   make_fake_sbx "$TMP/fake"
+
+  # Keep the transcript rescue inside the fixture. Without this the suite would
+  # write into the developer's real ~/.claude/projects.
+  CLAUDE_CONFIG_DIR="$TMP/claude"
+  export CLAUDE_CONFIG_DIR
 }
 
 task() {
@@ -33,6 +38,11 @@ expected_worktree() {
 expected_sandbox() {
   bash -c "source '$AGENT_LIB/naming.sh'
     naming_sandbox_name \"\$(naming_project_id '$REPO')\" '$1'"
+}
+
+# sbx_subcommands — the sbx subcommands invoked, in order, one per line.
+sbx_subcommands() {
+  grep -E '^arg:(create|rm|run|ls|kit|exec|cp)$' "$FAKE_SBX_DIR/calls.log" || true
 }
 
 # --- removal ------------------------------------------------------------
@@ -182,4 +192,93 @@ expected_sandbox() {
   assert_failure
   [[ "$stderr" == *"Not inside a git repository"* ]] ||
     fail "unexpected stderr: $stderr"
+}
+
+# --- transcript rescue ------------------------------------------------------
+
+@test "--done rescues the agent's transcripts before removing the sandbox" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+  fake_sbx_add_transcript "/home/agent/.claude/projects/-wt-feature-new-crud/abc.jsonl"
+
+  task --done feature/new-crud
+  assert_success
+
+  # Listed and copied while the sandbox still existed, and only then removed.
+  # If this ever reorders, the transcripts are gone before anyone reads them.
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:exec
+arg:cp
+arg:rm"
+
+  assert_file_exists "$CLAUDE_CONFIG_DIR/projects/-wt-feature-new-crud/abc.jsonl"
+  [[ "$stderr" == *"Rescued"* ]] || fail "rescue not reported: $stderr"
+}
+
+@test "a failing rescue still tears the task down" {
+  # A broken rescue must never be able to leave an undeletable sandbox behind.
+  task feature/new-crud
+  assert_success
+  fake_sbx_add_transcript "/home/agent/.claude/projects/-wt-feature-new-crud/abc.jsonl"
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+
+  FAKE_SBX_CP_EXIT=1 task --done feature/new-crud
+  assert_success
+  [[ "$stderr" == *"Could not rescue"* ]] || fail "failure not reported: $stderr"
+
+  [[ ! -e "$wt" ]] || fail "worktree still exists: $wt"
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_output_not_contains "agent-my-app-feature-new-crud"
+}
+
+@test "a sandbox that cannot be listed still gets removed" {
+  task feature/new-crud
+  assert_success
+
+  FAKE_SBX_EXEC_EXIT=1 task --done feature/new-crud
+  assert_success
+  [[ "$stderr" == *"Could not list the agent transcripts"* ]] ||
+    fail "failure not reported: $stderr"
+
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_output_not_contains "agent-my-app-feature-new-crud"
+}
+
+@test "TASK_AGENT_RESCUE_TRANSCRIPTS=no skips the rescue entirely" {
+  task feature/new-crud
+  assert_success
+  : >"$FAKE_SBX_DIR/calls.log"
+  fake_sbx_add_transcript "/home/agent/.claude/projects/-wt-feature-new-crud/abc.jsonl"
+
+  export TASK_AGENT_RESCUE_TRANSCRIPTS=no
+  task --done feature/new-crud
+  unset TASK_AGENT_RESCUE_TRANSCRIPTS
+  assert_success
+
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:rm"
+  assert_file_not_exists "$CLAUDE_CONFIG_DIR/projects/-wt-feature-new-crud/abc.jsonl"
+}
+
+@test "an invalid TASK_AGENT_RESCUE_TRANSCRIPTS fails before anything is removed" {
+  # Fail fast: a typo costs a re-run, never a half-torn-down task.
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+
+  export TASK_AGENT_RESCUE_TRANSCRIPTS=0
+  task --done feature/new-crud
+  unset TASK_AGENT_RESCUE_TRANSCRIPTS
+  assert_failure
+  [[ "$stderr" == *"Invalid TASK_AGENT_RESCUE_TRANSCRIPTS"* ]] ||
+    fail "unexpected stderr: $stderr"
+
+  [[ -d "$wt" ]] || fail "worktree was removed despite the invalid setting: $wt"
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_output_contains "agent-my-app-feature-new-crud"
 }

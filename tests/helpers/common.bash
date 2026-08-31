@@ -176,12 +176,14 @@ make_bare_origin() {
 #
 # It records every invocation, one argument per line with an explicit separator,
 # into $dir/calls.log so tests can assert on argument boundaries. The list of
-# sandboxes it reports comes from $dir/sandboxes (one name per line).
+# sandboxes it reports comes from $dir/sandboxes (one name per line), and the
+# in-sandbox transcript paths `sbx exec` reports from $dir/transcripts.
 make_fake_sbx() {
   local dir="$1"
   mkdir -p "$dir/bin"
   : >"$dir/calls.log"
   : >"$dir/sandboxes"
+  : >"$dir/transcripts"
 
   cat >"$dir/bin/sbx" <<'FAKE'
 #!/usr/bin/env bash
@@ -216,6 +218,25 @@ case "$1" in
       mv "${FAKE_SBX_DIR}/sandboxes.tmp" "${FAKE_SBX_DIR}/sandboxes"
     fi
     ;;
+  exec)
+    # Stands in for the transcript listing. The command the real sbx would run
+    # inside the container is deliberately *not* executed here: the point of
+    # the fake is that the paths come from the fixture, not from this host.
+    cat "${FAKE_SBX_DIR}/transcripts" 2>/dev/null
+    exit "${FAKE_SBX_EXEC_EXIT:-${FAKE_SBX_EXIT:-0}}"
+    ;;
+  cp)
+    # `sbx cp SANDBOX:PATH DST/` — materialise the file at the destination so
+    # the caller's atomic move has something to move.
+    src="$2"
+    dst="${3%/}"
+    remote="${src#*:}"
+    base="${remote##*/}"
+    if [[ -n "$dst" && -d "$dst" ]]; then
+      printf 'transcript of %s\n' "$remote" >"$dst/$base"
+    fi
+    exit "${FAKE_SBX_CP_EXIT:-${FAKE_SBX_EXIT:-0}}"
+    ;;
   kit)
     # task-agent does not use `sbx kit` (see tests/spike/sandbox-kit.bats), so
     # this branch exists only so that a regression calling it is visible in the
@@ -235,6 +256,22 @@ FAKE
 # fake_sbx_add_sandbox <name>
 fake_sbx_add_sandbox() {
   printf '%s\n' "$1" >>"$FAKE_SBX_DIR/sandboxes"
+}
+
+# fake_sbx_add_transcript <absolute-in-sandbox-path>
+#
+# Make `sbx exec` report one more transcript. The path is used verbatim, so a
+# test can deliberately pass one containing a space.
+fake_sbx_add_transcript() {
+  printf '%s\n' "$1" >>"$FAKE_SBX_DIR/transcripts"
+}
+
+# fake_sbx_subcommand_call_count <subcommand>
+#
+# Matches the whole line, so a path among the arguments cannot be mistaken for
+# the subcommand itself.
+fake_sbx_subcommand_call_count() {
+  grep -cx "arg:$1" "$FAKE_SBX_DIR/calls.log" || true
 }
 
 # fake_sbx_calls — the recorded log.

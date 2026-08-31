@@ -36,6 +36,7 @@ source "$AGENT_LIB_DIR/worktree.sh"
 source "$AGENT_LIB_DIR/sandbox.sh"
 source "$AGENT_LIB_DIR/scaffold.sh"
 source "$AGENT_LIB_DIR/kit.sh"
+source "$AGENT_LIB_DIR/transcripts.sh"
 source "$AGENT_LIB_DIR/session.sh"
 source "$AGENT_LIB_DIR/selfupdate.sh"
 

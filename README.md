@@ -206,8 +206,9 @@ asks first, and tells you what is at stake:
 ```text
 [task-agent] warning: The Sandbox Kit changed since sandbox 'agent-my-app-…' was created.
 [task-agent] warning: Applying it recreates that sandbox — Docker Sandboxes has no in-place
-[task-agent] warning: kit update — so anything that exists only inside the container is lost,
-[task-agent] warning: the agent's session state in there included.
+[task-agent] warning: kit update — so anything that exists only inside the container is lost.
+[task-agent] warning: The agent's transcripts are copied to the host first, so they still
+[task-agent] warning: reach /insights, but the session itself cannot be resumed afterwards.
 [task-agent] warning: The worktree on the host, its files and its commits are not affected.
 [task-agent] Recreate 'agent-my-app-…' from the current kit? [y/N]
 ```
@@ -276,6 +277,35 @@ idempotent: running it again when nothing is left just reports that.
 If the worktree has uncommitted or untracked changes, `--done` refuses to remove it (git's own
 worktree-removal safety check, not a separate one agent-cli adds) rather than silently discarding
 work. Commit, stash, or remove those changes and run it again.
+
+#### Your agent sessions are kept
+
+The agent runs inside the sandbox, so its session transcripts are written inside the sandbox too — and
+Claude Code's `/insights` reads transcripts from **your** machine. Left alone, every session you run
+through `task-agent` would be missing from that report, because the sandbox holding it is exactly what
+gets deleted.
+
+So before removing a sandbox — on `--done`, and when a changed Sandbox Kit forces a rebuild —
+`task-agent` copies the agent's transcripts out to `~/.claude/projects/` (or `$CLAUDE_CONFIG_DIR`, if
+you set one):
+
+```text
+[task-agent] Rescuing 3 agent transcript(s) from 'agent-my-app-…' to /Users/you/.claude/projects
+[task-agent] Rescued 3 agent transcript(s) from 'agent-my-app-…'
+```
+
+Only the session transcripts are copied, in that one direction. Nothing else is read out of the
+sandbox, and nothing — credentials included — is copied into it.
+
+This never stands between you and a teardown: if the copy fails, `task-agent` says so, tells you how
+to fetch the files by hand, and removes the sandbox anyway. To switch it off:
+
+```bash
+TASK_AGENT_RESCUE_TRANSCRIPTS=no task-agent --done feature/new-crud
+```
+
+One limit worth knowing: this only covers teardowns `task-agent` performs. Removing a sandbox yourself
+with `sbx rm`, `sbx prune` or `sbx reset` takes its transcripts with it.
 
 ### Updating task-agent
 
