@@ -67,5 +67,12 @@ the global network policy, the sandbox runtime login, agent authentication, regi
 stored secrets. A preset cannot carry any of it. Some of it is required once per machine before any
 task can start.
 
+**Agent configuration** — the agent's own settings *inside* a sandbox: installed skill plugins, MCP
+servers, the status line, `~/.claude/settings.json`. It is neither host state nor a task-agent
+concern: it is **kit content**, delivered by a preset's setup steps
+([ADR 0003](docs/adr/0003-agent-configuration-lives-in-the-preset-kit.md)). Note `~/.claude/skills`
+inside a sandbox is a mount of the *host's* skills directory, and so is host state that a kit must
+not write to.
+
 **Passthrough** — forwarding a `sbx` option through `task-agent` to the sandbox runtime. agent-cli
 deliberately has none; see [ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).

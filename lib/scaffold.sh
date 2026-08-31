@@ -111,12 +111,16 @@ scaffold_preset_url() {
     vaadin)
       printf '%s/presets/vaadin/spec.yaml' "${TASK_AGENT_PRESET_BASE_URL%/}"
       ;;
+    vaadin-claude)
+      printf '%s/presets/vaadin-claude/spec.yaml' "${TASK_AGENT_PRESET_BASE_URL%/}"
+      ;;
     *)
       die "Unknown preset: $1" \
         "" \
         "Available presets:" \
-        "  generic   JAVA_HOME, Maven/GitHub network access (the default)" \
-        "  vaadin    generic, plus Vaadin skills and MCP, Playwright, host Ollama" \
+        "  generic         JAVA_HOME, Maven/GitHub network access (the default)" \
+        "  vaadin          generic, plus Vaadin skills and MCP, and Playwright" \
+        "  vaadin-claude   vaadin, plus general skills and a context-usage status line" \
         "" \
         "To use a spec of your own instead, set TASK_AGENT_KIT_URL." \
         ""
@@ -230,7 +234,7 @@ scaffold_init() {
 # Printed once, right after --init.
 scaffold_preset_notes() {
   case "$1" in
-    vaadin)
+    vaadin | vaadin-claude)
       info ""
       info "Vaadin Pro components and TestBench need a licence inside the sandbox."
       info "task-agent does not deliver one; see 'Vaadin licence in the sandbox'"
