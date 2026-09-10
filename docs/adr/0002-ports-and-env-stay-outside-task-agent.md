@@ -56,3 +56,19 @@ A single decision to add passthrough for `--publish` **and** `--env` together, w
 create-time only: `sbx run` ignores `--publish` when re-attaching, and `--env` applies to the agent
 session. Any passthrough must therefore be a pure argv addition in `lib/sandbox.sh` and must not be
 remembered anywhere — architectural rule 1 still applies.
+
+## Re-measured on sbx v0.42.1 (2026-09-10)
+
+The decision is unchanged, and the list of options it would have to forward got *shorter*:
+
+- **CPU and memory are kit content now.** v0.42.0 lets a kit set them in a `sandbox.resources` block,
+  so a project that needs them writes them in its own `.sbx/kit/spec.yaml` and task-agent forwards
+  nothing. `--cpus`/`--memory` are off the table for good; only `--publish` and `--env` are left, which
+  is exactly the pair this decision says to reopen together or not at all.
+- **Ports changed behaviour, in the direction of the documented workaround.** v0.42.0 is a `BREAKING`
+  release for ports: `--publish` and kit-declared ports now default to `tcp4` instead of dual-stack
+  `tcp`, so `http://localhost:<port>` reaches a sandbox service that listens only on IPv4 — which is
+  the common case for a dev server. `sbx ports <sandbox> --publish 8080` also starts a stopped sandbox
+  by itself now. The by-hand step this ADR documents therefore got more reliable, not less.
+- The kit schema still has no `ports` field, and kit `environment.variables` still does not
+  interpolate, so the two measurements that produced this decision stand.

@@ -15,6 +15,13 @@ to `git` immediately — the sandbox is the isolation boundary, not a copy of yo
 `bash`, `git`, `curl`, and the [Docker Sandboxes CLI](https://docs.docker.com/reference/cli/sbx/)
 (`sbx`). Nothing else.
 
+`sbx` **v0.42.0 or newer** is recommended, and nothing here is checked against anything older than
+v0.38.0. Older versions still work; two things degrade. v0.38.0 fixed a destination-escape in
+`sbx cp`'s copy-out (CVE-2026-17106), which is how `task-agent` gets an agent's transcripts out of a
+sandbox. v0.42.0 stopped a new sandbox that reuses a deleted sandbox's name from inheriting its files
+and agent session history, which is what makes the transcript rescue copy each transcript exactly
+once.
+
 ## Install
 
 Two ways to install, each updated differently:
@@ -252,6 +259,11 @@ A kit cannot publish ports; the kit schema has no `ports` field. Publish them on
 sbx ls                                        # find the sandbox name
 sbx ports agent-my-app-feature-x-a1b2c3 --publish 8080
 ```
+
+Since `sbx` v0.42.0 a published port listens on IPv4 only unless you name the protocol
+(`--publish 8080:8080/tcp` for dual-stack), which is what makes `http://localhost:8080` reach a dev
+server inside the sandbox that binds IPv4. The same version made `sbx ports --publish` start a stopped
+sandbox by itself, so the command above no longer has to be typed while the agent is running.
 
 Inside the sandbox, `localhost` is the sandbox itself. Services on your **host** are reachable as
 `host.docker.internal`, and the network rule for them is written with the loopback name — a rule for

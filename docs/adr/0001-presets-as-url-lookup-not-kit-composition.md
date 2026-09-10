@@ -79,3 +79,24 @@ agent-cli continues to pass **exactly one** `--kit` to `sbx`.
 If a future reader sees `mixins:` in the kit schema and concludes that the layered design was simply
 missed: re-run `sbx kit validate` on a spec that uses it and read the warning. Reintroduce composition
 only after that warning is gone, and then revisit the digest invariant first.
+
+### Re-measured on sbx v0.42.1 (2026-09-10)
+
+Still no: the kit-spec v2 reference still states that `mixins` is accepted by the parser but that
+"runtime support is pending", and repeated `--kit` — which this decision already knew about and
+rejected — is unchanged apart from being labelled experimental.
+
+Two things did move, and neither changes the answer:
+
+- **`extends:` now composes properly.** Before v0.42.0 a child kit declaring its own setup commands,
+  credentials, allowlist, volumes or environment *replaced* the parent's; since v0.42.0 it inherits
+  them. That is the first real artifact-level composition sbx offers, so a future `vaadin-claude`
+  could in principle be `extends: <vaadin ref>` rather than a copy. It still fails on the same
+  invariant this decision protects: the parent lives outside the one `.sbx/kit` tree
+  `scaffold_kit_hash` digests, so a changed parent would not register as a changed kit — and resolving
+  a git or OCI parent would put a network fetch inside every `sbx create`, not just inside `--init`.
+- **Kits can take arguments** (`args:` plus `--kit-arg`). That is a substitution mechanism, not a
+  composition one, and it is a plausible future replacement for the `__PROJECT__` sentinel rather than
+  for this decision. It was weighed and declined: it would trade a `sed` in `--init` for an
+  experimental flag on every `sbx create`, and would make every user-edited project kit break if the
+  argument declaration were ever deleted — for a value that is cosmetic.

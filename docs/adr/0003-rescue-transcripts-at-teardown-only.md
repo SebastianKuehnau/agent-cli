@@ -75,7 +75,11 @@ into agent-cli.
   particular is an ordinary thing to type when a disk fills up. This is the real cost of this decision
   and it is not mitigated anywhere.
 - **The kit-recreate path can rescue the same session twice**, and the second copy will not be
-  re-analysed for facets. The numbers are corrected on the next report; the verdict is not.
+  re-analysed for facets. The numbers are corrected on the next report; the verdict is not. Re-measured
+  on sbx v0.42.1: v0.42.0 fixed a new sandbox that reuses a deleted sandbox's name inheriting "its
+  files, Docker images, or agent session history", so from that version on a recreated sandbox starts
+  with an empty `projects/` and this cannot arise. It stays on record because agent-cli still runs
+  against older sbx versions, where it can.
 - **The rescue is a step, not a command.** There is no `--rescue` flag, so there is no supported way to
   ask for one ahead of a manual cleanup. Adding one is a separate decision under "Scope discipline" in
   `CLAUDE.md`, and would be its own issue.

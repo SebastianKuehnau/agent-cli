@@ -80,7 +80,9 @@ These are load-bearing. Breaking one of them breaks the tool's core guarantees.
 
    The one exception, added by explicit decision for issue #7, is the applied-Sandbox-Kit cache in
    `lib/kit.sh` at `<main-repo>/.git/agent-cli/kit/<sandbox>`. It exists because Docker Sandboxes
-   offers no way to ask a sandbox which kit it currently has. It is permitted only as a **cache**,
+   offers no way to ask a sandbox which kit it currently has — re-measured on sbx v0.42.1:
+   `sbx ls --json` reports `name`, `id`, `agent`, `status` and `workspaces` and no kit at all, and
+   `sbx kit inspect` takes a kit *reference*, not a sandbox. It is permitted only as a **cache**,
    and that is what bounds the exception:
 
    - It may never be consulted to decide whether a branch, a worktree or a sandbox exists.
@@ -133,10 +135,42 @@ resolve unchanged. No path rewriting, no clone, no copy.
 
 `tests/spike/sandbox-worktree.bats` exists specifically to keep this assumption honest.
 
+## What task-agent asks `sbx`, and what it checks
+
+Five commands, and nothing else: `sbx ls -q`, `sbx create`, `sbx run`, `sbx rm --force`, and — for the
+transcript rescue — `sbx exec` and `sbx cp`. Two things about how they are called are easy to undo by
+accident.
+
+**The agent is named on create *and* on attach.** `sbx create … claude <workspaces>` is the documented
+mixin form (`sbx create claude --kit ./my-mixin/`), and `sbx run claude --name <sandbox>` is the
+documented re-attach form that *verifies* the sandbox's stored agent — the CLI answers a mismatch with
+`sandbox "<name>" already exists and runs the "shell" agent, not "claude"`. Attaching with
+`sbx run --name <sandbox>` alone works too, but then a sandbox that merely happens to carry the derived
+name — made by hand, by another tool, or for another agent — is silently attached to. The workspaces
+are still not repeated on attach; only the agent is. `tests/spike/sandbox-attach.bats` checks both the
+positive and the negative case against the real CLI.
+
+**A listing that fails is never read as absence.** `sandbox_exists` and `sandbox_list_names` check
+`sbx ls -q`'s exit status instead of discarding it, because "sbx could not answer" and "that sandbox is
+not there" are different answers: with no daemon running, treating the first as the second makes
+`--done` skip the rescue and the removal and still report the task torn down, and makes `--list` show
+every task with a missing sandbox. Both capture the output *before* splitting it so the status
+survives, and `sandbox_list_names` returns that status rather than dying on it — its caller reads it
+through a command substitution, where a `die` would only kill the subshell. `sandbox_die_unreachable`
+is the one wording both paths use.
+
 ## Dependencies
 
 Runtime: `bash`, `git`, `curl`, `sbx`. Nothing else — no `jq`, no Node, no `docker` CLI, no `gh`.
 `shasum` (macOS, via perl) or `sha256sum` is used for the short hash; one of the two is always present.
+
+**Minimum `sbx`: v0.42.0** (measured against v0.42.1). Older versions run, with two known costs.
+v0.38.0 fixed a destination-escape in `sbx cp`'s copy-out (CVE-2026-17106), which is the direction
+`lib/transcripts.sh` uses, so that is the floor. v0.42.0 is what makes transcript rule 3 below true:
+before it, a new sandbox reusing a deleted sandbox's name could inherit its files and agent session
+history. There is deliberately no version check in the code — a probe would mean parsing
+`sbx version --json` (a JSON parser, and `jq` is not a dependency) or its text output, to gate
+behaviour that degrades rather than breaks.
 
 Development only: `bats-core` for the tests and, optionally, `shellcheck`.
 
@@ -191,10 +225,18 @@ not to be added without a further explicit decision:
 `--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--rebuild`, `--rescue`; pull requests
 and GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
-`docker run`; project configuration files (`.sbxenv.yaml` included); custom template images; **any
+`docker run`; project configuration files (sbx's own environment files included — `sbxenv.yaml` in a
+project since sbx v0.42.0, with `~/.sbxenv.yaml` as the user-level base beneath it); custom template
+images; **any
 `sbx` option passthrough** (`--publish`, `--env`, `--env-file`, `--memory`, `--cpus`, `--template`,
 `--static-mcp`); and any generic `runtime_*` abstraction (Docker Sandboxes is the only runtime, and a
 one-implementation interface is unverifiable).
+
+`sbx env` grew considerably in v0.42.0 — a plan it asks you to approve, its own `args:`, workspaces,
+kits, ports, resources — and it still has no notion of a branch, so it cannot map one to a worktree and
+a sandbox. That is the whole of what task-agent does, and the reason it exists next to `sbx env` rather
+than in place of it. Also note `sandbox.resources` (v0.42.0) puts CPU and memory limits inside the kit,
+where a project can set them without task-agent forwarding anything.
 
 ## How `--done` tears down a task
 
@@ -282,8 +324,11 @@ Four rules hold this together:
    outside its worktree, and those transcripts vanish just the same.
 3. **Every file is copied every time; there is no skip-if-unchanged check.** `sbx rm` destroys the
    container filesystem, so a recreated sandbox starts with an empty `projects/` and the same
-   transcript is never rescued twice. A size-or-mtime comparison would also rest on `sbx cp`
-   preserving mtime, which `sbx cp --help` does not promise.
+   transcript is never rescued twice. This is a guarantee only from sbx v0.42.0 on, which fixed name
+   reuse inheriting "files, Docker images, or agent session history" from a deleted sandbox; on older
+   versions the same transcript could be rescued again, which costs a re-copy and nothing else. A
+   size-or-mtime comparison would also rest on `sbx cp` preserving mtime, which `sbx cp --help` does
+   not promise.
 4. **An invalid `TASK_AGENT_RESCUE_TRANSCRIPTS` fails, and fails early.** It is validated at the top of
    `session_start` and `session_done`, before anything is created or removed, so a typo costs a re-run
    rather than a half-torn-down task. Values are `yes` (the default) and `no`, matching
@@ -337,13 +382,21 @@ implementation looks the way it does:
 One real trade-off comes with that. `sbx kit add`'s swap preserves kit-owned volumes — explicitly
 including agent session state — whereas `sbx rm` does not, so recreating loses the agent's session
 inside that sandbox. Getting the preserving behaviour would mean rewriting the kit's `name` per
-version so it appends as a *new* kit, which means YAML surgery without a parser and a kit list that
-grows forever, with the old kit's settings still composed in — i.e. "add a mixin", not "apply the
-current kit". That is why the loss is accepted and the user is asked instead.
+version so it appends as a *new* kit, which leaves a kit list that grows forever with the old kit's
+settings still composed in — i.e. "add a mixin", not "apply the current kit". That is why the loss is
+accepted and the user is asked instead.
 
-Do not reintroduce a `sbx kit add` call path without re-running that spike first. Note it also refuses
-sandboxes created before its recreate feature shipped, so it could never have been depended on
-unconditionally.
+That argument used to carry a second half — that rewriting the name means YAML surgery without a
+parser — and sbx v0.42.0 removed it: a kit can declare `args:` and take
+`--kit-arg name=value`, so a per-version name needs no editing at all. The remaining objection is
+unchanged and is the one that decides it, so this is recorded only so the decision is not reopened on
+the obsolete half.
+
+Do not reintroduce a `sbx kit add` call path without re-running that spike first. Re-measured on sbx
+v0.42.1: still `add`, `inspect`, `pack`, `provenance`, `pull`, `push`, `sign`, `validate`, `verify` —
+no replace, no remove, and `sbx kit add --help` still says "appended to its original kit list". Note it
+also refuses sandboxes created before its recreate feature shipped, so it could never have been
+depended on unconditionally.
 
 Three pieces, deliberately separate:
 
