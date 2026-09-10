@@ -60,6 +60,7 @@ Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
   task-agent --done <branch> [--force]
+  task-agent --list [--all]
   task-agent --update
   task-agent --version
 
@@ -77,6 +78,9 @@ Commands:
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
+  --list        List this project's tasks: every branch that has a worktree,
+                and the sandbox belonging to it. A '-' means that side is
+                not there.
   --update      Install the latest task-agent release, unless it is already
                 installed. Only works for a single-file install; a git
                 checkout is updated with 'git pull' instead.
@@ -88,6 +92,8 @@ Options:
   --force       Only with --done: remove the worktree even when it has
                 uncommitted or untracked changes, discarding them. Commits
                 are never at risk — the branch is kept either way.
+  --all         Only with --list: also list every other sandbox on this
+                machine, whether or not task-agent created it.
   --help, -h    Show this help.
 ```
 
@@ -299,6 +305,34 @@ collide.
 There is no state file. What exists is rediscovered from `git worktree list` and `sbx ls`, so you can
 inspect and clean up with plain `git` and `sbx` commands. The one thing written down — which Sandbox
 Kit a sandbox last got, under `.git/agent-cli/kit/` — is a cache that nothing depends on being there.
+
+### See what exists
+
+```bash
+task-agent --list
+```
+
+```
+BRANCH             SANDBOX                              WORKTREE
+feature/new-crud   agent-my-app-feature-new-crud-a84c9  /Users/me/projects/my-app-worktrees/feature-new-crud-a84c91
+spike/grid         -                                    /Users/me/projects/my-app-worktrees/spike-grid-1f0b2e
+-                  agent-my-app-old-branch-77c3de       -
+```
+
+One row per task, and a `-` where one side of it is missing: a worktree whose sandbox was removed, or
+a sandbox whose worktree was. Nothing is read from a file `task-agent` wrote — the table is built from
+`git worktree list` and `sbx ls` on the spot, which is exactly why it can show a half-torn-down task
+at all.
+
+The table goes to stdout, so it pipes:
+
+```bash
+task-agent --list | grep ' - '     # tasks missing a sandbox or a worktree
+```
+
+Sandboxes belonging to other projects are left out. `--list --all` adds them, along with every other
+sandbox on the machine, under an `OTHER SANDBOXES` heading — task-agent cannot tell which of those it
+once created, and does not guess.
 
 ### Tear down a task
 

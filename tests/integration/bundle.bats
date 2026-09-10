@@ -34,6 +34,18 @@ setup() {
   assert_success
 }
 
+@test "every lib module is in the bundle" {
+  # scripts/build-bundle.sh names the lib files one by one, so adding a module
+  # and forgetting the build script produces a bundle that is missing it and a
+  # test suite that never notices. This is the check that notices: it compares
+  # the build script's list against what lib/ actually holds.
+  local listed actual
+  listed="$(grep -oE '\$ROOT/lib/[a-z]+\.sh' "$AGENT_REPO_ROOT/scripts/build-bundle.sh" |
+    sed 's|.*/||' | sort)"
+  actual="$(cd "$AGENT_REPO_ROOT/lib" && ls ./*.sh | sed 's|\./||' | sort)"
+  assert_equal "$listed" "$actual"
+}
+
 @test "the bundle contains no source lines" {
   run grep -c '^source ' "$BUNDLE"
   assert_failure  # grep -c finds none -> exit 1
@@ -147,4 +159,23 @@ arg:run"
   run --separate-stderr "$TASK_AGENT" --update
   assert_failure
   [[ "$stderr" == *"git checkout"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "--list on the bundle works, with no sibling lib/" {
+  # Proves lib/listing.sh made it into the bundle, and early enough in the
+  # concatenation for bin/task-agent's cmd_list to call it.
+  local repo="$TMP/my-app"
+  make_repo "$repo" >/dev/null
+  mkdir -p "$repo/.sbx/kit"
+  printf 'schemaVersion: "2"\nkind: mixin\n' >"$repo/.sbx/kit/spec.yaml"
+
+  run --separate-stderr bash -c \
+    "cd '$repo' && '$INSTALL_DIR/task-agent' feature/new-crud"
+  assert_success
+
+  run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' --list"
+  assert_success
+  assert_output_contains "feature/new-crud"
+  [[ "$stderr" != *"No such file or directory"* ]] ||
+    fail "bundle tried to source a missing lib/ file: $stderr"
 }

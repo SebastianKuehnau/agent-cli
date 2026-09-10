@@ -11,7 +11,7 @@ original scaffold and is not used by the build or the tests.
 `--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), and
 `--version` by a further one (issue #6, which needed a version to compare), which is why none of them
 are in the Phase 1 exclusion list under "Scope discipline" below. `--done --force` joined them by
-issue #23. Everything else in that list still applies.
+issue #23, and `--list` by issue #25. Everything else in that list still applies.
 
 Issue #18 added the transcript rescue. It adds no flag and no argument: it is a step inside the two
 teardown paths that already existed. A standalone `--rescue` was considered and deliberately left out
@@ -56,6 +56,8 @@ lib/scaffold.sh      `--init`, the preset table and the kit digest: create .sbx/
 lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a cache, not state)
 lib/transcripts.sh   rescuing the agent's *.jsonl session transcripts out of a sandbox to the
                      host, immediately before the sandbox is destroyed
+lib/listing.sh       `--list`: the read-only view of what exists, related from `git worktree list`
+                     and `sbx ls -q` alone
 lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
@@ -182,8 +184,8 @@ Conventions:
 
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
 (issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — `--version` by another
-one (issue #6), and `--done --force` by issue #23. Still not implemented, and not to be added without
-a further explicit decision:
+one (issue #6), `--done --force` by issue #23 and `--list` by issue #25. Still not implemented, and
+not to be added without a further explicit decision:
 `--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--rebuild`, `--rescue`; pull requests
 and GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
@@ -215,6 +217,37 @@ Three things about `--force` are deliberate:
 - **It is rejected everywhere else.** `--force` with `--init`, `--update`, `--version` or a plain
   branch invocation is an error, not a silently ignored argument, because there is nothing it could
   mean there.
+
+## How `--list` shows what exists
+
+`--list` (`lib/listing.sh`, issue #25) is a **view**, not a registry. It answers "what tasks are there
+right now" by asking the same two systems every other command asks — `git worktree list --porcelain`
+and `sbx ls -q` — and relating them with `naming_sandbox_name`. Nothing task-agent wrote earlier is
+read, so architectural rule 1 is untouched, and the applied-kit cache is deliberately not consulted
+even though it happens to hold sandbox names.
+
+Five things about it are load-bearing.
+
+1. **The two sides are looked up independently, so one missing never hides the other.** A worktree
+   whose sandbox is gone and a sandbox whose worktree is gone are both rows, each with a `-` for the
+   part that is not there. That is the same independence `session_done` has, for the same reason: a
+   half-torn-down task is exactly the state a user needs to see.
+2. **The relation only runs one way.** A sandbox name ends in a hash of the raw branch name and
+   cannot be inverted, so an orphan sandbox is reported as itself, with `-` for the branch. Do not
+   add a reverse lookup — it would have to guess, and `<slug>-<hash>` exists precisely so that
+   guessing is impossible.
+3. **The table is stdout.** It is data, like `--version`, and the second thing task-agent writes
+   there. The "no tasks yet" hint stays on stderr, so a piped listing is only ever rows.
+4. **Only `--list --all` reaches beyond the project.** Its `OTHER SANDBOXES` section is a plain list
+   of names, with no claim about which of them task-agent created — the `agent-<project>-` prefix
+   cannot tell a sandbox of another project from a hand-made one of the same shape.
+5. **No bash 4.** `lib/listing.sh` wants a set and a map and uses neither: membership is a loop over
+   a global array, because namerefs (`local -n`) and associative arrays (`declare -A`) are bash 4
+   features, macOS still ships bash 3.2, and nothing else in agent-cli uses one. Do not introduce
+   the first.
+
+`scripts/build-bundle.sh` names each lib file explicitly, so a new module must be added there too;
+`tests/integration/bundle.bats` compares that list against `lib/` and fails when they diverge.
 
 ## How the agent's transcripts get out of a sandbox
 

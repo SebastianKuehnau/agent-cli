@@ -37,6 +37,7 @@ source "$AGENT_LIB_DIR/sandbox.sh"
 source "$AGENT_LIB_DIR/scaffold.sh"
 source "$AGENT_LIB_DIR/kit.sh"
 source "$AGENT_LIB_DIR/transcripts.sh"
+source "$AGENT_LIB_DIR/listing.sh"
 source "$AGENT_LIB_DIR/session.sh"
 source "$AGENT_LIB_DIR/selfupdate.sh"
 
@@ -48,6 +49,7 @@ Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
   task-agent --done <branch> [--force]
+  task-agent --list [--all]
   task-agent --update
   task-agent --version
 
@@ -65,6 +67,9 @@ Commands:
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
+  --list        List this project's tasks: every branch that has a worktree,
+                and the sandbox belonging to it. A '-' means that side is
+                not there.
   --update      Install the latest task-agent release, unless it is already
                 installed. Only works for a single-file install; a git
                 checkout is updated with 'git pull' instead.
@@ -76,13 +81,16 @@ Options:
   --force       Only with --done: remove the worktree even when it has
                 uncommitted or untracked changes, discarding them. Commits
                 are never at risk — the branch is kept either way.
+  --all         Only with --list: also list every other sandbox on this
+                machine, whether or not task-agent created it.
   --help, -h    Show this help.
 EOF
 }
 
 main() {
   local branch="" base="$AGENT_DEFAULT_BASE_BRANCH"
-  local do_init=0 do_done=0 do_update=0 do_version=0 base_seen=0 force=0
+  local do_init=0 do_done=0 do_update=0 do_version=0 do_list=0
+  local base_seen=0 force=0 all=0
 
   if (($# == 0)); then
     usage >&2
@@ -111,6 +119,10 @@ main() {
         do_version=1
         shift
         ;;
+      --list)
+        do_list=1
+        shift
+        ;;
       --base)
         if (($# < 2)); then
           error "--base requires a branch name."
@@ -135,6 +147,10 @@ main() {
         force=1
         shift
         ;;
+      --all)
+        all=1
+        shift
+        ;;
       --)
         shift
         ;;
@@ -156,9 +172,17 @@ main() {
     esac
   done
 
-  local mode_count=$((do_init + do_done + do_update + do_version))
+  local mode_count=$((do_init + do_done + do_update + do_version + do_list))
   if ((mode_count > 1)); then
-    error "Only one of --init, --done, --update, --version may be given."
+    error "Only one of --init, --done, --list, --update, --version may be given."
+    usage >&2
+    exit 1
+  fi
+
+  # --all belongs to --list alone. Rejected here, before the per-mode blocks,
+  # so every other mode gets the same message without repeating the check.
+  if ((all && !do_list)); then
+    error "--all is only valid with --list."
     usage >&2
     exit 1
   fi
@@ -221,6 +245,28 @@ main() {
     return
   fi
 
+  if ((do_list)); then
+    if [[ -n "$branch" ]]; then
+      error "--list does not take a branch name (got: $branch)"
+      usage >&2
+      exit 1
+    fi
+    if ((base_seen)); then
+      error "--base is not valid with --list."
+      usage >&2
+      exit 1
+    fi
+    if ((force)); then
+      error "--force is not valid with --list."
+      usage >&2
+      exit 1
+    fi
+    local all_arg=""
+    ((all)) && all_arg="all"
+    cmd_list "$all_arg"
+    return
+  fi
+
   if ((do_done)); then
     if ((base_seen)); then
       error "--base is not valid with --done."
@@ -271,6 +317,21 @@ cmd_init() {
   else
     scaffold_init "$main_root"
   fi
+}
+
+# cmd_list [all]
+#
+# Read-only: it looks the world up and prints it, and creates nothing. It still
+# requires a repository and sbx, because both are what it reads.
+cmd_list() {
+  git_require_git
+  git_require_repo
+  sandbox_require_cli
+
+  local main_root
+  main_root="$(git_main_repo_root)" || exit 1
+
+  listing_run "$main_root" "${1:-}"
 }
 
 cmd_update() {

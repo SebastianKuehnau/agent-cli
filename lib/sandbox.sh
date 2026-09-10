@@ -40,6 +40,15 @@ sandbox_exists() {
   return 1
 }
 
+# sandbox_list_names
+#
+# Every sandbox the runtime knows about, one name per line — the same `sbx ls
+# -q` sandbox_exists asks, for the caller that needs the whole set rather than
+# one answer (lib/listing.sh). Kept here so `sbx` stays invoked from one module.
+sandbox_list_names() {
+  sbx ls -q 2>/dev/null
+}
+
 # sandbox_build_create_argv <name> <kit-dir> <workspace> [extra-workspace...]
 #
 # The first workspace is the git worktree the agent works in. Every workspace is
