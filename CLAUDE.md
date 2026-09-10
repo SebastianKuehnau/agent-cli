@@ -447,6 +447,33 @@ any of it *works* is only knowable from `tests/spike/sandbox-preset-claude.bats`
 sbx and skips without one. It is also the only check that the kit schema accepts the multi-line
 command; every other shipped `setup.install` command is a one-liner.
 
+## How the agent itself is kept up to date
+
+Claude Code is baked into `docker/sandbox-templates:claude-code`, and nothing inside a sandbox ever
+refreshes it — a sandbox built from a three-week-old image runs a three-week-old agent (issue #19).
+Every shipped preset therefore carries `claude update || true` as its first `setup.install` step.
+
+Four things about that decision:
+
+- **It is kit content, not a task-agent feature.** The same boundary as agent configuration
+  (ADR 0003): `task-agent` does not manage the agent, it runs it. There is deliberately no flag, no
+  per-start `sbx exec claude update`, and no version check in `session_start` — a refresh on every
+  start would add latency to every task and put task-agent back in charge of the agent.
+- **`|| true` is load-bearing here, unlike the SDKMAN case below.** A best-effort update that cannot
+  reach the network must not fail sandbox creation, because the image's version still works. Without
+  the guard every offline `task-agent <branch>` would fail at creation. This is the opposite of a
+  `|| true` that hides a command which can never work.
+- **The generic preset carries it too.** An out-of-date agent is not a Vaadin-specific problem, and
+  `generic` gained its first `setup:` block for this.
+- **It only runs at creation, so a long-lived sandbox still ages.** The accepted answer is `--done`
+  and start the task again. Verified against a real sandbox: the step took ~7s and moved a fresh
+  sandbox from the image's 2.1.246 to 2.1.267, with no addition to the kit's network allowlist —
+  the claude agent kit's own allowlist already reaches the release host.
+
+`tests/unit/scaffold.bats` asserts every shipped preset has the step and keeps the guard;
+`tests/spike/sandbox-preset-claude.bats` is the only check that it actually updates anything, and it
+skips without a real sbx.
+
 ## No custom template image
 
 agent-cli passes no `-t`, and there is no Dockerfile here. That is a measured decision, not an

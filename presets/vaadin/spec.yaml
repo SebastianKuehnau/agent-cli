@@ -10,6 +10,18 @@ description: >-
 
 setup:
   install:
+    # Claude Code is baked into the sandbox template image, and nothing in the
+    # sandbox ever updates it — an image a few weeks old means an agent a few
+    # weeks old (issue #19). This brings it to the current release when the
+    # sandbox is built.
+    #
+    # `|| true` on purpose: an update that cannot reach the network must not
+    # fail sandbox creation. The version from the image still works, so a
+    # best-effort refresh is worth strictly more than a sandbox that refuses to
+    # start when you are offline.
+    - command: "claude update || true"
+      user: "1000"
+
     # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
     - command: "claude plugin marketplace add vaadin/agent-marketplace && claude plugin install vaadin-skills@vaadin-marketplace"
       user: "1000"

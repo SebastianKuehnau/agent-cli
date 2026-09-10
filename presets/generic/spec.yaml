@@ -7,12 +7,25 @@ description: JDK toolchain and Maven/GitHub network access.
 # __PROJECT__ is set by `task-agent --init`. Cosmetic: only shows in `sbx kit inspect`.
 # Deliberately small — add what you need, delete what you don't.
 
-# The base image already has JDK 25, Node, npm, Python and Docker. To add more:
+# The base image already has JDK 25, Node, npm, Python and Docker. To add more,
+# append to setup.install below:
 #
-# setup:
-#   install:
 #     - command: "sudo apt-get update && sudo apt-get install -y protobuf-compiler"
 #       user: "1000"
+
+setup:
+  install:
+    # Claude Code is baked into the sandbox template image, and nothing in the
+    # sandbox ever updates it — an image a few weeks old means an agent a few
+    # weeks old (issue #19). This brings it to the current release when the
+    # sandbox is built.
+    #
+    # `|| true` on purpose: an update that cannot reach the network must not
+    # fail sandbox creation. The version from the image still works, so a
+    # best-effort refresh is worth strictly more than a sandbox that refuses to
+    # start when you are offline.
+    - command: "claude update || true"
+      user: "1000"
 
 environment:
   variables:

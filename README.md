@@ -124,9 +124,18 @@ task-agent --init vaadin-claude
 
 | Preset | Contains |
 | --- | --- |
-| `generic` | `JAVA_HOME`, Maven and GitHub network access. Deliberately small. |
+| `generic` | `JAVA_HOME`, Maven and GitHub network access, and a Claude Code update. Deliberately small. |
 | `vaadin` | the above, plus the Vaadin skills and MCP, and Playwright browsers |
 | `vaadin-claude` | the above, plus general engineering skills and a status line showing context-window usage |
+
+All three update Claude Code when the sandbox is built. The sandbox template image bakes in whichever
+version was current when it was published, and nothing inside a sandbox ever refreshes it, so without
+this step an image a few weeks old means an agent a few weeks old. The step costs a few seconds per
+sandbox and cannot fail the build: if it cannot reach the network it gives up and the image's version
+is used.
+
+A long-lived sandbox still ages, because the step only runs at creation. `task-agent --done <branch>`
+followed by starting the task again rebuilds it on the current release.
 
 The presets themselves live in this repository under
 [`presets/`](presets/) and are downloaded from its default branch, so the file you read is the file
