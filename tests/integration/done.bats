@@ -282,3 +282,133 @@ arg:rm"
   run cat "$FAKE_SBX_DIR/sandboxes"
   assert_output_contains "agent-my-app-feature-new-crud"
 }
+
+# --- --force (issue #23) ----------------------------------------------------
+#
+# A modified *tracked* file is the dirt these tests rely on: unlike an untracked
+# file it cannot be hidden by the developer's global gitignore, so what git
+# refuses here does not depend on whose machine the suite runs on.
+
+@test "--done refuses a worktree with uncommitted changes and keeps it" {
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  printf 'edited by the agent\n' >"$wt/README.md"
+
+  task --done feature/new-crud
+  assert_failure
+  [[ -d "$wt" ]] || fail "worktree was removed despite uncommitted changes: $wt"
+  [[ "$stderr" == *"uncommitted or untracked changes"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "the refusal points at --done --force, not at raw git" {
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  printf 'edited by the agent\n' >"$wt/README.md"
+
+  task --done feature/new-crud
+  assert_failure
+  [[ "$stderr" == *"task-agent --done <branch> --force"* ]] ||
+    fail "the hint should name task-agent's own flag: $stderr"
+}
+
+@test "--done --force removes a worktree with uncommitted changes" {
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  printf 'edited by the agent\n' >"$wt/README.md"
+
+  task --done feature/new-crud --force
+  assert_success
+  assert_file_not_exists "$wt"
+}
+
+@test "--done --force removes a worktree with untracked files" {
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  printf 'scratch\n' >"$wt/untracked-agent-file.txt"
+
+  task --done feature/new-crud --force
+  assert_success
+  assert_file_not_exists "$wt"
+}
+
+@test "--done --force still keeps the branch" {
+  # --force is about the worktree's files only. Commits stay reachable through
+  # the branch ref, which task-agent never deletes.
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  printf 'work in progress\n' >"$wt/notes.md"
+  git_quiet -C "$wt" add notes.md
+  git_quiet -C "$wt" commit --quiet -m "committed in the worktree"
+  local sha
+  sha="$(git -C "$wt" rev-parse HEAD)"
+  printf 'and then some uncommitted edit\n' >"$wt/README.md"
+
+  task --done feature/new-crud --force
+  assert_success
+
+  run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/new-crud
+  assert_success
+  assert_equal "$(git -C "$REPO" rev-parse refs/heads/feature/new-crud)" "$sha"
+}
+
+@test "--done --force reports that changes are being discarded" {
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  printf 'edited by the agent\n' >"$wt/README.md"
+
+  task --done feature/new-crud --force
+  assert_success
+  [[ "$stderr" == *"Discarding any uncommitted and untracked changes"* ]] ||
+    fail "the loss was not reported: $stderr"
+}
+
+@test "--done --force still rescues transcripts before removing the sandbox" {
+  # --force changes how the worktree is removed and nothing else; the sandbox
+  # path, transcript rescue included, is untouched by it.
+  task feature/new-crud
+  assert_success
+  fake_sbx_add_transcript "/home/agent/.claude/projects/-wt-feature-new-crud/abc.jsonl"
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  printf 'edited by the agent\n' >"$wt/README.md"
+
+  task --done feature/new-crud --force
+  assert_success
+  assert_file_exists "$CLAUDE_CONFIG_DIR/projects/-wt-feature-new-crud/abc.jsonl"
+}
+
+@test "--done --force works when only the sandbox is left" {
+  # The two removals stay independent: --force must not make a missing worktree
+  # an error.
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+  git_quiet -C "$REPO" worktree remove --force "$wt"
+
+  task --done feature/new-crud --force
+  assert_success
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_output_not_contains "agent-my-app-feature-new-crud"
+}

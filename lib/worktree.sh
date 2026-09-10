@@ -144,22 +144,40 @@ worktree_ensure() {
   printf '%s' "$path"
 }
 
-# worktree_remove <main-repo-root> <path>
+# worktree_remove <main-repo-root> <path> [force]
 #
-# Remove a worktree. Deliberately never passes --force: git already refuses
-# when the worktree has modified or untracked files, which is the only real
-# hazard here. Unpushed commits are not a hazard at all, because agent-cli
-# never deletes the branch — its ref keeps them reachable regardless of
-# whether the worktree that once held them still exists.
+# Remove a worktree. By default no --force is passed: git refuses when the
+# worktree has modified or untracked files, which is the only real hazard here.
+# Unpushed commits are not a hazard at all, because agent-cli never deletes the
+# branch — its ref keeps them reachable regardless of whether the worktree that
+# once held them still exists.
+#
+# <force> is the literal string `force` and comes from `task-agent --done
+# --force` (issue #23). It discards exactly what git was protecting: the
+# uncommitted and untracked files in the worktree. It is a separate argument
+# rather than a default because that loss is the whole point of the flag, and
+# nothing else recovers it.
 worktree_remove() {
-  local main_root="$1" path="$2"
+  local main_root="$1" path="$2" force="${3:-}"
 
-  git -C "$main_root" worktree remove "$path" >&2 ||
+  local -a argv=(git -C "$main_root" worktree remove)
+  [[ "$force" == "force" ]] && argv+=(--force)
+  argv+=("$path")
+
+  "${argv[@]}" >&2 && return 0
+
+  if [[ "$force" == "force" ]]; then
     die "Failed to remove the worktree at:" \
       "  $path" \
-      "It may contain uncommitted or untracked changes. Commit, stash, or" \
-      "remove them, then run task-agent --done again." \
-      "" \
-      "To remove it anyway and discard those changes, run:" \
-      "  git -C '$main_root' worktree remove --force '$path'"
+      "--force was already used, so this is not about uncommitted changes." \
+      "The git output above should explain why."
+  fi
+
+  die "Failed to remove the worktree at:" \
+    "  $path" \
+    "It may contain uncommitted or untracked changes. Commit, stash, or" \
+    "remove them, then run task-agent --done again." \
+    "" \
+    "To remove it anyway and discard those changes, run:" \
+    "  task-agent --done <branch> --force"
 }

@@ -10,8 +10,8 @@ original scaffold and is not used by the build or the tests.
 
 `--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), and
 `--version` by a further one (issue #6, which needed a version to compare), which is why none of them
-are in the Phase 1 exclusion list under "Scope discipline" below. Everything else in that list still
-applies.
+are in the Phase 1 exclusion list under "Scope discipline" below. `--done --force` joined them by
+issue #23. Everything else in that list still applies.
 
 Issue #18 added the transcript rescue. It adds no flag and no argument: it is a step inside the two
 teardown paths that already existed. A standalone `--rescue` was considered and deliberately left out
@@ -181,9 +181,10 @@ Conventions:
 ## Scope discipline
 
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
-(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — and `--version` by another
-one (issue #6). Still not implemented, and not to be added without a further explicit decision:
-`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--force`, `--rebuild`, `--rescue`; pull requests
+(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — `--version` by another
+one (issue #6), and `--done --force` by issue #23. Still not implemented, and not to be added without
+a further explicit decision:
+`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--rebuild`, `--rescue`; pull requests
 and GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
 `docker run`; project configuration files (`.sbxenv.yaml` included); custom template images; **any
@@ -197,13 +198,23 @@ one-implementation interface is unverifiable).
 branch itself — and treats the two removals as independent: it checks and removes each on its own,
 so a worktree that was deleted by hand can never block cleanup of an orphaned sandbox, or vice versa.
 
-Worktree removal (`worktree_remove`, `lib/worktree.sh`) deliberately never passes `--force` to
-`git worktree remove`. Git already refuses when the worktree has modified or untracked files, which
-is the only real hazard: because the branch is never deleted, unpushed *commits* are never at risk —
-the branch ref keeps them reachable whether or not a worktree for it still exists. Do not add an
-agent-cli-level `--force` for this without an explicit decision (see "Scope discipline" above);
-a user who wants to override git's own refusal can already do so directly with
-`git worktree remove --force`.
+Worktree removal (`worktree_remove`, `lib/worktree.sh`) passes `--force` to `git worktree remove`
+only when `task-agent --done <branch> --force` asked for it (issue #23). Without the flag git refuses
+when the worktree has modified or untracked files, which is the only real hazard: because the branch
+is never deleted, unpushed *commits* are never at risk — the branch ref keeps them reachable whether
+or not a worktree for it still exists.
+
+Three things about `--force` are deliberate:
+
+- **It is spelled `force`, not `1`.** `bin/task-agent` turns the flag into the literal string, and
+  `session_done` hands that string to `worktree_remove` unchanged, so the value being tested says
+  what it means at every hop rather than being a bare boolean two calls from its meaning.
+- **It reaches the worktree and nothing else.** The sandbox is removed with `sbx rm --force`
+  regardless, the transcript rescue still runs first, and the branch is still kept — so `--force`
+  can only ever cost the worktree's uncommitted and untracked *files*.
+- **It is rejected everywhere else.** `--force` with `--init`, `--update`, `--version` or a plain
+  branch invocation is an error, not a silently ignored argument, because there is nothing it could
+  mean there.
 
 ## How the agent's transcripts get out of a sandbox
 

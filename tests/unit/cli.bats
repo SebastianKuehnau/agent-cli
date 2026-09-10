@@ -65,12 +65,21 @@ cli() {
 }
 
 @test "help does not mention commands from later phases" {
+  # --force left this list when issue #23 decided it in: it is now a documented
+  # option of --done, not a later phase.
   cli --help
   assert_success
   local flag
-  for flag in --submit --sync --status --shell --plan --force --rebuild; do
+  for flag in --submit --sync --status --shell --plan --rebuild; do
     assert_output_not_contains "$flag"
   done
+}
+
+@test "help documents --force as belonging to --done" {
+  cli --help
+  assert_success
+  assert_output_contains "--done <branch> [--force]"
+  assert_output_contains "Only with --done"
 }
 
 @test "help documents --done, --update and --version" {
@@ -193,6 +202,34 @@ cli() {
   cli --init --base develop
   assert_failure
   [[ "$stderr" == *"--base is not valid with --init"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force without --done is rejected" {
+  cli feature/x --force
+  assert_failure
+  [[ "$stderr" == *"--force is only valid with --done"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force with --init is rejected" {
+  cli --init --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --init"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force with --update is rejected" {
+  cli --update --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --update"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force with --version is rejected" {
+  cli --version --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --version"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 

@@ -59,16 +59,18 @@ mv ~/.local/bin/agent-task ~/.local/bin/task-agent
 Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
-  task-agent --done <branch>
+  task-agent --done <branch> [--force]
   task-agent --update
   task-agent --version
 
 Commands:
   --init        Download the Docker Sandbox Kit into the current project,
                 starting from <preset>. Default: generic.
-                  generic   JAVA_HOME, Maven/GitHub network access.
-                  vaadin    generic, plus Vaadin skills and MCP, Playwright,
-                            and access to a host Ollama.
+                  generic         JAVA_HOME, Maven/GitHub network access.
+                  vaadin          generic, plus the Vaadin skills and MCP,
+                                  and Playwright browsers.
+                  vaadin-claude   vaadin, plus general engineering skills and
+                                  a context-usage status line.
                 The kit is a starting value: it is yours to edit afterwards,
                 and a later change to the preset does not affect it.
   <branch>      Create or reuse the branch, its worktree and its sandbox,
@@ -83,6 +85,9 @@ Commands:
 Options:
   --base        Base branch for a newly created branch. Default: main.
                 Ignored when the branch already exists.
+  --force       Only with --done: remove the worktree even when it has
+                uncommitted or untracked changes, discarding them. Commits
+                are never at risk — the branch is kept either way.
   --help, -h    Show this help.
 ```
 
@@ -307,7 +312,15 @@ idempotent: running it again when nothing is left just reports that.
 
 If the worktree has uncommitted or untracked changes, `--done` refuses to remove it (git's own
 worktree-removal safety check, not a separate one agent-cli adds) rather than silently discarding
-work. Commit, stash, or remove those changes and run it again.
+work. Commit, stash, or remove those changes and run it again — or, when the changes are genuinely
+scratch, discard them with `--force`:
+
+```bash
+task-agent --done feature/new-crud --force
+```
+
+`--force` affects the worktree's *files* only. Commits are never at risk: the branch is kept either
+way, and its ref keeps every commit reachable whether or not a worktree for it still exists.
 
 #### Your agent sessions are kept
 

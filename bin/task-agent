@@ -47,7 +47,7 @@ usage() {
 Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
-  task-agent --done <branch>
+  task-agent --done <branch> [--force]
   task-agent --update
   task-agent --version
 
@@ -73,13 +73,16 @@ Commands:
 Options:
   --base        Base branch for a newly created branch. Default: main.
                 Ignored when the branch already exists.
+  --force       Only with --done: remove the worktree even when it has
+                uncommitted or untracked changes, discarding them. Commits
+                are never at risk — the branch is kept either way.
   --help, -h    Show this help.
 EOF
 }
 
 main() {
   local branch="" base="$AGENT_DEFAULT_BASE_BRANCH"
-  local do_init=0 do_done=0 do_update=0 do_version=0 base_seen=0
+  local do_init=0 do_done=0 do_update=0 do_version=0 base_seen=0 force=0
 
   if (($# == 0)); then
     usage >&2
@@ -128,6 +131,10 @@ main() {
         base_seen=1
         shift
         ;;
+      --force)
+        force=1
+        shift
+        ;;
       --)
         shift
         ;;
@@ -167,6 +174,11 @@ main() {
       usage >&2
       exit 1
     fi
+    if ((force)); then
+      error "--force is not valid with --version."
+      usage >&2
+      exit 1
+    fi
     # The only thing task-agent ever writes to stdout: a version is data a
     # script may want to read, unlike the progress reporting in lib/logging.sh.
     printf '%s\n' "$TASK_AGENT_VERSION"
@@ -176,6 +188,11 @@ main() {
   if ((do_init)); then
     if ((base_seen)); then
       error "--base is not valid with --init."
+      usage >&2
+      exit 1
+    fi
+    if ((force)); then
+      error "--force is not valid with --init."
       usage >&2
       exit 1
     fi
@@ -195,6 +212,11 @@ main() {
       usage >&2
       exit 1
     fi
+    if ((force)); then
+      error "--force is not valid with --update."
+      usage >&2
+      exit 1
+    fi
     cmd_update
     return
   fi
@@ -210,8 +232,18 @@ main() {
       usage >&2
       exit 1
     fi
-    session_done "$branch"
+    # `force` is spelled out rather than passed as 0/1 so that the value
+    # worktree_remove reads says what it means at every hop.
+    local force_arg=""
+    ((force)) && force_arg="force"
+    session_done "$branch" "$force_arg"
     return
+  fi
+
+  if ((force)); then
+    error "--force is only valid with --done."
+    usage >&2
+    exit 1
   fi
 
   if [[ -z "$branch" ]]; then

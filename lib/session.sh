@@ -192,7 +192,7 @@ session_kit_kept() {
   warning "  task-agent --done <branch>   # then start the task again"
 }
 
-# session_done <branch>
+# session_done <branch> [force]
 #
 # Remove the sandbox and the worktree for a branch, if they exist. The branch
 # itself is always kept — this is teardown of the ephemeral parts of the
@@ -201,8 +201,12 @@ session_kit_kept() {
 # Sandbox and worktree removal are independent: each is checked and removed
 # on its own, so a worktree that was removed by hand can never block cleanup
 # of an orphaned sandbox, or vice versa.
+#
+# <force> is the literal string `force`, from `task-agent --done --force`
+# (issue #23). It reaches only worktree_remove: the sandbox is removed with
+# `sbx rm --force` either way, and the branch is never touched by either.
 session_done() {
-  local branch="$1"
+  local branch="$1" force="${2:-}"
 
   git_require_git
   git_require_repo
@@ -239,8 +243,11 @@ session_done() {
 
   local worktree
   if worktree="$(worktree_find_for_branch "$main_root" "$branch")"; then
+    if [[ "$force" == "force" ]]; then
+      warning "Discarding any uncommitted and untracked changes in: $worktree"
+    fi
     info "Removing worktree: $worktree"
-    worktree_remove "$main_root" "$worktree"
+    worktree_remove "$main_root" "$worktree" "$force"
   else
     info "No worktree found for '$branch'"
   fi
