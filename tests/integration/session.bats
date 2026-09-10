@@ -113,6 +113,26 @@ arg:create
 arg:run"
 }
 
+@test "re-attaching names the agent so sbx verifies the sandbox" {
+  task feature/new-crud
+  assert_success
+
+  local sandbox
+  sandbox="$(expected_sandbox feature/new-crud)"
+
+  # The attach is the last recorded call. Asserted argument by argument: naming
+  # the agent is what makes sbx refuse a sandbox of that name belonging to
+  # another agent, and the workspaces must still not be repeated.
+  run bash -c "awk '/^=== call\$/{blk=\"\"} {blk = blk \$0 \"\\n\"} END{printf \"%s\", blk}' \
+    '$FAKE_SBX_DIR/calls.log'"
+  assert_success
+  assert_equal "$output" "=== call
+arg:run
+arg:claude
+arg:--name
+arg:$sandbox"
+}
+
 @test "the checked-out branch inside the worktree is the requested one" {
   task feature/new-crud
   assert_success
@@ -619,7 +639,9 @@ arg:run"
 }
 
 @test "a sandbox creation failure is reported and not silently ignored" {
-  run --separate-stderr env FAKE_SBX_EXIT=1 bash -c \
+  # Only `create` fails: a wholesale FAKE_SBX_EXIT would already stop the run at
+  # the existence check, which is a different failure with a different message.
+  run --separate-stderr env FAKE_SBX_CREATE_EXIT=1 bash -c \
     "cd '$REPO' && '$TASK_AGENT' feature/new-crud"
   assert_failure
   [[ "$stderr" == *"Failed to create the sandbox"* ]] ||

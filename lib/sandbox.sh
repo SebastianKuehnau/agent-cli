@@ -32,12 +32,51 @@ sandbox_require_cli() {
 # `sbx ls -q` prints one sandbox name per line, which is why agent-cli needs no
 # JSON parser. Docker Sandboxes is the source of truth for sandbox existence —
 # agent-cli keeps no session state of its own.
+#
+# The listing's exit status is checked rather than discarded, because "sbx could
+# not answer" and "that sandbox is not there" are different answers and reading
+# the first as the second is silently wrong: with the daemon down, `--done`
+# would report success while the sandbox and its transcripts lived on. Output
+# and status are captured before the output is split, so the status is not
+# swallowed by a pipeline or a process substitution — the same reason
+# transcripts_list captures first. stderr is deliberately not redirected: sbx's
+# own message is what explains the failure, exactly as for sandbox_create.
+#
+# `die` is correct here: every caller tests this function directly, never inside
+# a command substitution, so there is no subshell for the exit to be lost in.
 sandbox_exists() {
-  local name="$1" line
+  local name="$1" out status line
+  out="$(sbx ls -q)"
+  status=$?
+  ((status == 0)) || sandbox_die_unreachable "$status"
+
   while IFS= read -r line; do
     [[ "$line" == "$name" ]] && return 0
-  done < <(sbx ls -q 2>/dev/null)
+  done <<<"$out"
   return 1
+}
+
+# sandbox_list_names
+#
+# Every sandbox the runtime knows about, one name per line — the same `sbx ls
+# -q` sandbox_exists asks, for the caller that needs the whole set rather than
+# one answer (lib/listing.sh). Kept here so `sbx` stays invoked from one module.
+#
+# This one returns sbx's exit status instead of dying on it: its caller reads
+# the names through a command substitution, and a `die` in a subshell would only
+# kill the subshell. The caller must check the status and call
+# sandbox_die_unreachable itself.
+sandbox_list_names() {
+  sbx ls -q
+}
+
+# sandbox_die_unreachable <status>
+#
+# One wording for "the runtime did not answer", shared by every caller of the
+# two functions above so the message cannot drift between them.
+sandbox_die_unreachable() {
+  die "Docker Sandboxes did not answer: 'sbx ls' exited with status $1." \
+    "The sbx output above should explain why; 'sbx version' shows whether the daemon is running."
 }
 
 # sandbox_build_create_argv <name> <kit-dir> <workspace> [extra-workspace...]
@@ -66,11 +105,19 @@ sandbox_build_create_argv() {
 
 # sandbox_build_attach_argv <name>
 #
-# `sbx run --name X` re-attaches to an existing sandbox and reads the agent from
-# that sandbox's stored spec, so the agent and the workspaces do not have to be
-# repeated.
+# `sbx run --name X` re-attaches to an existing sandbox and reads the agent and
+# the workspaces from that sandbox's stored spec, so the workspaces do not have
+# to be repeated.
+#
+# The agent *is* repeated, on purpose. `sbx run --name X` alone attaches to
+# whatever carries that name; naming the agent as well makes sbx verify the
+# sandbox's stored agent against it ("Re-attach to an existing sandbox by name
+# and verify the expected agent" — `sbx run --help`, v0.42.1). Without it a
+# sandbox that happens to match the derived name — made by hand, by another
+# tool, or for another agent — is silently attached to instead of refused.
+# tests/spike/sandbox-attach.bats checks this against the real CLI.
 sandbox_build_attach_argv() {
-  AGENT_SBX_ARGV=(sbx run --name "$1")
+  AGENT_SBX_ARGV=(sbx run "$AGENT_SBX_AGENT" --name "$1")
 }
 
 # sandbox_create <name> <kit-dir> <workspace> [extra-workspace...]

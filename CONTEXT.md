@@ -67,6 +67,12 @@ the global network policy, the sandbox runtime login, agent authentication, regi
 stored secrets. A preset cannot carry any of it. Some of it is required once per machine before any
 task can start.
 
+**Project agent configuration** — the `.claude/` directory in the project itself: permission
+allowlists, slash commands, project instructions. It belongs to the repository, but is typically
+untracked, so a linked worktree never gets it from the checkout — task-agent copies it in, and takes
+the copies back out at teardown ([ADR 0004](docs/adr/0004-project-claude-config-is-copied-into-the-worktree.md)).
+Distinct from **agent configuration** below, which lives inside the sandbox and is the kit's job.
+
 **Agent configuration** — the agent's own settings *inside* a sandbox: installed skill plugins, MCP
 servers, the status line, `~/.claude/settings.json`. It is neither host state nor a task-agent
 concern: it is **kit content**, delivered by a preset's setup steps

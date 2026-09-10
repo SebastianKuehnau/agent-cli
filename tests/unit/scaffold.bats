@@ -451,6 +451,30 @@ init_preset() {
   done
 }
 
+@test "every shipped preset updates Claude Code at setup time" {
+  # The template image bakes in whatever Claude Code was current when it was
+  # built, and nothing in a sandbox ever refreshes it (issue #19). Every preset
+  # has to ask, including the generic one — an agent weeks out of date is not a
+  # Vaadin-specific problem.
+  local root="${AGENT_LIB%/lib}" name
+  for name in generic vaadin vaadin-claude; do
+    grep -q 'claude update' "$root/presets/$name/spec.yaml" ||
+      fail "preset '$name' never updates Claude Code"
+  done
+}
+
+@test "the Claude Code update cannot fail a sandbox build" {
+  # Best-effort on purpose: an update that cannot reach the network must not
+  # stop the sandbox from being created, because the image's version still
+  # works. Dropping the guard would make every offline `task-agent <branch>`
+  # fail at sandbox creation.
+  local root="${AGENT_LIB%/lib}" name
+  for name in generic vaadin vaadin-claude; do
+    grep -q 'claude update || true' "$root/presets/$name/spec.yaml" ||
+      fail "preset '$name' lets a failed update break sandbox creation"
+  done
+}
+
 @test "the generic preset carries no Vaadin-specific configuration" {
   # The kit --init used to download was Vaadin-specific despite being the
   # default. `generic` must stay generic; Vaadin is an explicit --init vaadin.

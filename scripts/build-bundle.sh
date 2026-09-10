@@ -28,6 +28,8 @@ cat \
   "$ROOT/lib/scaffold.sh" \
   "$ROOT/lib/kit.sh" \
   "$ROOT/lib/transcripts.sh" \
+  "$ROOT/lib/projectconfig.sh" \
+  "$ROOT/lib/listing.sh" \
   "$ROOT/lib/session.sh" \
   "$ROOT/lib/selfupdate.sh"
 

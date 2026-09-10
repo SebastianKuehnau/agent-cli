@@ -10,8 +10,8 @@ original scaffold and is not used by the build or the tests.
 
 `--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), and
 `--version` by a further one (issue #6, which needed a version to compare), which is why none of them
-are in the Phase 1 exclusion list under "Scope discipline" below. Everything else in that list still
-applies.
+are in the Phase 1 exclusion list under "Scope discipline" below. `--done --force` joined them by
+issue #23, and `--list` by issue #25. Everything else in that list still applies.
 
 Issue #18 added the transcript rescue. It adds no flag and no argument: it is a step inside the two
 teardown paths that already existed. A standalone `--rescue` was considered and deliberately left out
@@ -56,6 +56,10 @@ lib/scaffold.sh      `--init`, the preset table and the kit digest: create .sbx/
 lib/kit.sh           the applied-Sandbox-Kit cache under .git/agent-cli/kit (a cache, not state)
 lib/transcripts.sh   rescuing the agent's *.jsonl session transcripts out of a sandbox to the
                      host, immediately before the sandbox is destroyed
+lib/listing.sh       `--list`: the read-only view of what exists, related from `git worktree list`
+                     and `sbx ls -q` alone
+lib/projectconfig.sh carrying the project's own .claude/ into a task's worktree, and taking the
+                     copies back out before the worktree is removed
 lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
@@ -76,7 +80,9 @@ These are load-bearing. Breaking one of them breaks the tool's core guarantees.
 
    The one exception, added by explicit decision for issue #7, is the applied-Sandbox-Kit cache in
    `lib/kit.sh` at `<main-repo>/.git/agent-cli/kit/<sandbox>`. It exists because Docker Sandboxes
-   offers no way to ask a sandbox which kit it currently has. It is permitted only as a **cache**,
+   offers no way to ask a sandbox which kit it currently has — re-measured on sbx v0.42.1:
+   `sbx ls --json` reports `name`, `id`, `agent`, `status` and `workspaces` and no kit at all, and
+   `sbx kit inspect` takes a kit *reference*, not a sandbox. It is permitted only as a **cache**,
    and that is what bounds the exception:
 
    - It may never be consulted to decide whether a branch, a worktree or a sandbox exists.
@@ -129,10 +135,42 @@ resolve unchanged. No path rewriting, no clone, no copy.
 
 `tests/spike/sandbox-worktree.bats` exists specifically to keep this assumption honest.
 
+## What task-agent asks `sbx`, and what it checks
+
+Five commands, and nothing else: `sbx ls -q`, `sbx create`, `sbx run`, `sbx rm --force`, and — for the
+transcript rescue — `sbx exec` and `sbx cp`. Two things about how they are called are easy to undo by
+accident.
+
+**The agent is named on create *and* on attach.** `sbx create … claude <workspaces>` is the documented
+mixin form (`sbx create claude --kit ./my-mixin/`), and `sbx run claude --name <sandbox>` is the
+documented re-attach form that *verifies* the sandbox's stored agent — the CLI answers a mismatch with
+`sandbox "<name>" already exists and runs the "shell" agent, not "claude"`. Attaching with
+`sbx run --name <sandbox>` alone works too, but then a sandbox that merely happens to carry the derived
+name — made by hand, by another tool, or for another agent — is silently attached to. The workspaces
+are still not repeated on attach; only the agent is. `tests/spike/sandbox-attach.bats` checks both the
+positive and the negative case against the real CLI.
+
+**A listing that fails is never read as absence.** `sandbox_exists` and `sandbox_list_names` check
+`sbx ls -q`'s exit status instead of discarding it, because "sbx could not answer" and "that sandbox is
+not there" are different answers: with no daemon running, treating the first as the second makes
+`--done` skip the rescue and the removal and still report the task torn down, and makes `--list` show
+every task with a missing sandbox. Both capture the output *before* splitting it so the status
+survives, and `sandbox_list_names` returns that status rather than dying on it — its caller reads it
+through a command substitution, where a `die` would only kill the subshell. `sandbox_die_unreachable`
+is the one wording both paths use.
+
 ## Dependencies
 
 Runtime: `bash`, `git`, `curl`, `sbx`. Nothing else — no `jq`, no Node, no `docker` CLI, no `gh`.
 `shasum` (macOS, via perl) or `sha256sum` is used for the short hash; one of the two is always present.
+
+**Minimum `sbx`: v0.42.0** (measured against v0.42.1). Older versions run, with two known costs.
+v0.38.0 fixed a destination-escape in `sbx cp`'s copy-out (CVE-2026-17106), which is the direction
+`lib/transcripts.sh` uses, so that is the floor. v0.42.0 is what makes transcript rule 3 below true:
+before it, a new sandbox reusing a deleted sandbox's name could inherit its files and agent session
+history. There is deliberately no version check in the code — a probe would mean parsing
+`sbx version --json` (a JSON parser, and `jq` is not a dependency) or its text output, to gate
+behaviour that degrades rather than breaks.
 
 Development only: `bats-core` for the tests and, optionally, `shellcheck`.
 
@@ -181,15 +219,24 @@ Conventions:
 ## Scope discipline
 
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
-(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — and `--version` by another
-one (issue #6). Still not implemented, and not to be added without a further explicit decision:
-`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--force`, `--rebuild`, `--rescue`; pull requests
+(issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — `--version` by another
+one (issue #6), `--done --force` by issue #23 and `--list` by issue #25. Still not implemented, and
+not to be added without a further explicit decision:
+`--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--rebuild`, `--rescue`; pull requests
 and GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
-`docker run`; project configuration files (`.sbxenv.yaml` included); custom template images; **any
+`docker run`; project configuration files (sbx's own environment files included — `sbxenv.yaml` in a
+project since sbx v0.42.0, with `~/.sbxenv.yaml` as the user-level base beneath it); custom template
+images; **any
 `sbx` option passthrough** (`--publish`, `--env`, `--env-file`, `--memory`, `--cpus`, `--template`,
 `--static-mcp`); and any generic `runtime_*` abstraction (Docker Sandboxes is the only runtime, and a
 one-implementation interface is unverifiable).
+
+`sbx env` grew considerably in v0.42.0 — a plan it asks you to approve, its own `args:`, workspaces,
+kits, ports, resources — and it still has no notion of a branch, so it cannot map one to a worktree and
+a sandbox. That is the whole of what task-agent does, and the reason it exists next to `sbx env` rather
+than in place of it. Also note `sandbox.resources` (v0.42.0) puts CPU and memory limits inside the kit,
+where a project can set them without task-agent forwarding anything.
 
 ## How `--done` tears down a task
 
@@ -197,13 +244,54 @@ one-implementation interface is unverifiable).
 branch itself — and treats the two removals as independent: it checks and removes each on its own,
 so a worktree that was deleted by hand can never block cleanup of an orphaned sandbox, or vice versa.
 
-Worktree removal (`worktree_remove`, `lib/worktree.sh`) deliberately never passes `--force` to
-`git worktree remove`. Git already refuses when the worktree has modified or untracked files, which
-is the only real hazard: because the branch is never deleted, unpushed *commits* are never at risk —
-the branch ref keeps them reachable whether or not a worktree for it still exists. Do not add an
-agent-cli-level `--force` for this without an explicit decision (see "Scope discipline" above);
-a user who wants to override git's own refusal can already do so directly with
-`git worktree remove --force`.
+Worktree removal (`worktree_remove`, `lib/worktree.sh`) passes `--force` to `git worktree remove`
+only when `task-agent --done <branch> --force` asked for it (issue #23). Without the flag git refuses
+when the worktree has modified or untracked files, which is the only real hazard: because the branch
+is never deleted, unpushed *commits* are never at risk — the branch ref keeps them reachable whether
+or not a worktree for it still exists.
+
+Three things about `--force` are deliberate:
+
+- **It is spelled `force`, not `1`.** `bin/task-agent` turns the flag into the literal string, and
+  `session_done` hands that string to `worktree_remove` unchanged, so the value being tested says
+  what it means at every hop rather than being a bare boolean two calls from its meaning.
+- **It reaches the worktree and nothing else.** The sandbox is removed with `sbx rm --force`
+  regardless, the transcript rescue still runs first, and the branch is still kept — so `--force`
+  can only ever cost the worktree's uncommitted and untracked *files*.
+- **It is rejected everywhere else.** `--force` with `--init`, `--update`, `--version` or a plain
+  branch invocation is an error, not a silently ignored argument, because there is nothing it could
+  mean there.
+
+## How `--list` shows what exists
+
+`--list` (`lib/listing.sh`, issue #25) is a **view**, not a registry. It answers "what tasks are there
+right now" by asking the same two systems every other command asks — `git worktree list --porcelain`
+and `sbx ls -q` — and relating them with `naming_sandbox_name`. Nothing task-agent wrote earlier is
+read, so architectural rule 1 is untouched, and the applied-kit cache is deliberately not consulted
+even though it happens to hold sandbox names.
+
+Five things about it are load-bearing.
+
+1. **The two sides are looked up independently, so one missing never hides the other.** A worktree
+   whose sandbox is gone and a sandbox whose worktree is gone are both rows, each with a `-` for the
+   part that is not there. That is the same independence `session_done` has, for the same reason: a
+   half-torn-down task is exactly the state a user needs to see.
+2. **The relation only runs one way.** A sandbox name ends in a hash of the raw branch name and
+   cannot be inverted, so an orphan sandbox is reported as itself, with `-` for the branch. Do not
+   add a reverse lookup — it would have to guess, and `<slug>-<hash>` exists precisely so that
+   guessing is impossible.
+3. **The table is stdout.** It is data, like `--version`, and the second thing task-agent writes
+   there. The "no tasks yet" hint stays on stderr, so a piped listing is only ever rows.
+4. **Only `--list --all` reaches beyond the project.** Its `OTHER SANDBOXES` section is a plain list
+   of names, with no claim about which of them task-agent created — the `agent-<project>-` prefix
+   cannot tell a sandbox of another project from a hand-made one of the same shape.
+5. **No bash 4.** `lib/listing.sh` wants a set and a map and uses neither: membership is a loop over
+   a global array, because namerefs (`local -n`) and associative arrays (`declare -A`) are bash 4
+   features, macOS still ships bash 3.2, and nothing else in agent-cli uses one. Do not introduce
+   the first.
+
+`scripts/build-bundle.sh` names each lib file explicitly, so a new module must be added there too;
+`tests/integration/bundle.bats` compares that list against `lib/` and fails when they diverge.
 
 ## How the agent's transcripts get out of a sandbox
 
@@ -236,8 +324,11 @@ Four rules hold this together:
    outside its worktree, and those transcripts vanish just the same.
 3. **Every file is copied every time; there is no skip-if-unchanged check.** `sbx rm` destroys the
    container filesystem, so a recreated sandbox starts with an empty `projects/` and the same
-   transcript is never rescued twice. A size-or-mtime comparison would also rest on `sbx cp`
-   preserving mtime, which `sbx cp --help` does not promise.
+   transcript is never rescued twice. This is a guarantee only from sbx v0.42.0 on, which fixed name
+   reuse inheriting "files, Docker images, or agent session history" from a deleted sandbox; on older
+   versions the same transcript could be rescued again, which costs a re-copy and nothing else. A
+   size-or-mtime comparison would also rest on `sbx cp` preserving mtime, which `sbx cp --help` does
+   not promise.
 4. **An invalid `TASK_AGENT_RESCUE_TRANSCRIPTS` fails, and fails early.** It is validated at the top of
    `session_start` and `session_done`, before anything is created or removed, so a typo costs a re-run
    rather than a half-torn-down task. Values are `yes` (the default) and `no`, matching
@@ -291,13 +382,21 @@ implementation looks the way it does:
 One real trade-off comes with that. `sbx kit add`'s swap preserves kit-owned volumes — explicitly
 including agent session state — whereas `sbx rm` does not, so recreating loses the agent's session
 inside that sandbox. Getting the preserving behaviour would mean rewriting the kit's `name` per
-version so it appends as a *new* kit, which means YAML surgery without a parser and a kit list that
-grows forever, with the old kit's settings still composed in — i.e. "add a mixin", not "apply the
-current kit". That is why the loss is accepted and the user is asked instead.
+version so it appends as a *new* kit, which leaves a kit list that grows forever with the old kit's
+settings still composed in — i.e. "add a mixin", not "apply the current kit". That is why the loss is
+accepted and the user is asked instead.
 
-Do not reintroduce a `sbx kit add` call path without re-running that spike first. Note it also refuses
-sandboxes created before its recreate feature shipped, so it could never have been depended on
-unconditionally.
+That argument used to carry a second half — that rewriting the name means YAML surgery without a
+parser — and sbx v0.42.0 removed it: a kit can declare `args:` and take
+`--kit-arg name=value`, so a per-version name needs no editing at all. The remaining objection is
+unchanged and is the one that decides it, so this is recorded only so the decision is not reopened on
+the obsolete half.
+
+Do not reintroduce a `sbx kit add` call path without re-running that spike first. Re-measured on sbx
+v0.42.1: still `add`, `inspect`, `pack`, `provenance`, `pull`, `push`, `sign`, `validate`, `verify` —
+no replace, no remove, and `sbx kit add --help` still says "appended to its original kit list". Note it
+also refuses sandboxes created before its recreate feature shipped, so it could never have been
+depended on unconditionally.
 
 Three pieces, deliberately separate:
 
@@ -373,7 +472,55 @@ name changes no behaviour.
 and `TASK_AGENT_PRESET_BASE_URL` must point at this repository. Add a preset by adding both the table
 entry and the file — the test fails if you add only one.
 
+## How the project's own .claude reaches the sandbox
+
+`git worktree add` checks out **tracked** files, and a project's `.claude/` is usually untracked —
+at least `settings.local.json`, which is personal by convention. So a task's worktree had no
+`.claude/` at all, and since the sandbox mounts that worktree at its host path, the agent inside
+started without the project's permissions, commands or overrides (issue #24,
+[ADR 0004](docs/adr/0004-project-claude-config-is-copied-into-the-worktree.md)).
+
+`lib/projectconfig.sh` fills that gap by copying, because copying is the only option that puts the
+files where Claude Code actually looks: it reads project settings from `<cwd>/.claude`, so mounting
+the main repository's `.claude` somewhere else would be read by nothing.
+
+Two entry points, deliberately symmetric — `projectconfig_seed` from `session_start`, right after
+`worktree_ensure`, and `projectconfig_prune` from `session_done`, right before `worktree_remove`.
+
+Five rules hold it together:
+
+1. **Nothing is ever overwritten, and nothing is ever deleted by the seed.** It fills gaps. That is
+   what makes it safe on *every* start rather than only the one that created the worktree: a
+   restarted task picks up configuration added since, and a file the agent changed is left alone.
+2. **The prune re-derives what to remove and never guesses.** A file goes only when the main
+   repository has one at the same relative path, the two are byte-identical, and git does not track
+   it in the worktree. Nothing is written down about what was copied — architectural rule 1 holds,
+   and a changed copy is recognised as the agent's by being different.
+3. **The prune is what keeps `--force` exceptional.** Untracked files make `git worktree remove`
+   refuse, so without it every `--done` of such a project would need `--force` — and a user in the
+   habit of passing `--force` eventually loses real work with it. `tests/integration/projectconfig.bats`
+   has the test for this, verified to fail when the prune is removed.
+4. **Neither step may fail a task.** Both are called with `|| true`, like the transcript rescue.
+5. **It is `.claude` and nothing else.** Not a general file-copying feature, not configurable to
+   another path. `TASK_AGENT_PROJECT_CONFIG` is `yes` (the default) or `no`, validated early in both
+   `session_start` and `session_done`, and a typo fails rather than reading as "off" — the same
+   vocabulary and the same strictness as `TASK_AGENT_KIT_RECREATE`.
+
+This does **not** loosen ADR 0003 below: that is about the agent's configuration *inside* a sandbox
+(`~/.claude`, skills, MCP, the status line), which is still kit content task-agent never writes.
+This is the project's own configuration, which lives in the repository and is missing only because
+of how a worktree is built. task-agent still knows nothing about Claude's configuration format — it
+copies opaque files.
+
+Note the machine-dependence: where `.claude` is in the developer's **global** gitignore it was never
+dirt to begin with and the prune is invisible; where it is not, the prune is the difference between
+`--done` working and refusing. Tests must neutralise `core.excludesFile`, or they only pass on the
+first kind of machine.
+
 ## How agent configuration reaches the sandbox
+
+This section is about the agent's configuration *inside* a sandbox. For the *project's* `.claude/`,
+which is a different thing with a different answer, see the section above.
 
 Skills and Claude Code configuration are **kit content, not a task-agent feature** (issue #20,
 `docs/adr/0003-agent-configuration-lives-in-the-preset-kit.md`). `--init` still writes
@@ -402,6 +549,33 @@ merged rather than overwritten, nothing written to `~/.claude/skills`, both plug
 any of it *works* is only knowable from `tests/spike/sandbox-preset-claude.bats`, which needs a real
 sbx and skips without one. It is also the only check that the kit schema accepts the multi-line
 command; every other shipped `setup.install` command is a one-liner.
+
+## How the agent itself is kept up to date
+
+Claude Code is baked into `docker/sandbox-templates:claude-code`, and nothing inside a sandbox ever
+refreshes it — a sandbox built from a three-week-old image runs a three-week-old agent (issue #19).
+Every shipped preset therefore carries `claude update || true` as its first `setup.install` step.
+
+Four things about that decision:
+
+- **It is kit content, not a task-agent feature.** The same boundary as agent configuration
+  (ADR 0003): `task-agent` does not manage the agent, it runs it. There is deliberately no flag, no
+  per-start `sbx exec claude update`, and no version check in `session_start` — a refresh on every
+  start would add latency to every task and put task-agent back in charge of the agent.
+- **`|| true` is load-bearing here, unlike the SDKMAN case below.** A best-effort update that cannot
+  reach the network must not fail sandbox creation, because the image's version still works. Without
+  the guard every offline `task-agent <branch>` would fail at creation. This is the opposite of a
+  `|| true` that hides a command which can never work.
+- **The generic preset carries it too.** An out-of-date agent is not a Vaadin-specific problem, and
+  `generic` gained its first `setup:` block for this.
+- **It only runs at creation, so a long-lived sandbox still ages.** The accepted answer is `--done`
+  and start the task again. Verified against a real sandbox: the step took ~7s and moved a fresh
+  sandbox from the image's 2.1.246 to 2.1.267, with no addition to the kit's network allowlist —
+  the claude agent kit's own allowlist already reaches the release host.
+
+`tests/unit/scaffold.bats` asserts every shipped preset has the step and keeps the guard;
+`tests/spike/sandbox-preset-claude.bats` is the only check that it actually updates anything, and it
+skips without a real sbx.
 
 ## No custom template image
 

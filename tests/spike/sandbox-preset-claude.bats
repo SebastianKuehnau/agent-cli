@@ -14,7 +14,10 @@
 #      Docker Sandboxes seeds that file, and overwriting it would throw the
 #      seeded configuration away;
 #   3. `claude plugin install` leaves both plugins *enabled*, not merely
-#      downloaded.
+#      downloaded;
+#   4. `claude update` can actually reach its release host from inside a
+#      sandbox (issue #19) — the preset's allowlist only adds to the claude
+#      agent kit's own, and never names an Anthropic host itself.
 #
 # Skipped automatically when sbx is unavailable, so the normal suite stays
 # runnable everywhere. Slow: the preset installs Playwright's chromium. Run
@@ -146,4 +149,36 @@ in_sandbox() {
 
   run in_sandbox bash -c 'command -v jq'
   assert_success
+}
+
+# --- the agent's own version (issue #19) ------------------------------------
+
+@test "the sandbox's Claude Code is the current release, not the image's" {
+  # The setup step runs `claude update`. If the network policy blocked it, or
+  # `|| true` swallowed a real failure, the agent would silently be whatever
+  # the template image happened to ship. Asking `claude update` again is the
+  # check: on a sandbox that already updated it reports being up to date,
+  # having nothing left to do.
+  create_sandbox
+
+  run in_sandbox bash -lc 'claude update'
+  assert_success
+  [[ "$output" == *"up to date"* ]] ||
+    fail "the setup step did not leave Claude Code current: $output"
+}
+
+@test "the updated Claude Code is the one on PATH" {
+  # `claude update` installs into ~/.local/share/claude/versions and repoints
+  # ~/.local/bin/claude. A version that is installed but not the one the agent
+  # runs would be no update at all.
+  create_sandbox
+
+  run in_sandbox bash -lc 'claude --version'
+  assert_success
+  local running="${output%% *}"
+
+  run in_sandbox bash -lc 'claude update'
+  assert_success
+  [[ "$output" == *"$running"* ]] ||
+    fail "the version on PATH ($running) is not the updated one: $output"
 }

@@ -15,6 +15,13 @@ to `git` immediately — the sandbox is the isolation boundary, not a copy of yo
 `bash`, `git`, `curl`, and the [Docker Sandboxes CLI](https://docs.docker.com/reference/cli/sbx/)
 (`sbx`). Nothing else.
 
+`sbx` **v0.42.0 or newer** is recommended, and nothing here is checked against anything older than
+v0.38.0. Older versions still work; two things degrade. v0.38.0 fixed a destination-escape in
+`sbx cp`'s copy-out (CVE-2026-17106), which is how `task-agent` gets an agent's transcripts out of a
+sandbox. v0.42.0 stopped a new sandbox that reuses a deleted sandbox's name from inheriting its files
+and agent session history, which is what makes the transcript rescue copy each transcript exactly
+once.
+
 ## Install
 
 Two ways to install, each updated differently:
@@ -59,22 +66,28 @@ mv ~/.local/bin/agent-task ~/.local/bin/task-agent
 Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
-  task-agent --done <branch>
+  task-agent --done <branch> [--force]
+  task-agent --list [--all]
   task-agent --update
   task-agent --version
 
 Commands:
   --init        Download the Docker Sandbox Kit into the current project,
                 starting from <preset>. Default: generic.
-                  generic   JAVA_HOME, Maven/GitHub network access.
-                  vaadin    generic, plus Vaadin skills and MCP, Playwright,
-                            and access to a host Ollama.
+                  generic         JAVA_HOME, Maven/GitHub network access.
+                  vaadin          generic, plus the Vaadin skills and MCP,
+                                  and Playwright browsers.
+                  vaadin-claude   vaadin, plus general engineering skills and
+                                  a context-usage status line.
                 The kit is a starting value: it is yours to edit afterwards,
                 and a later change to the preset does not affect it.
   <branch>      Create or reuse the branch, its worktree and its sandbox,
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
+  --list        List this project's tasks: every branch that has a worktree,
+                and the sandbox belonging to it. A '-' means that side is
+                not there.
   --update      Install the latest task-agent release, unless it is already
                 installed. Only works for a single-file install; a git
                 checkout is updated with 'git pull' instead.
@@ -83,6 +96,11 @@ Commands:
 Options:
   --base        Base branch for a newly created branch. Default: main.
                 Ignored when the branch already exists.
+  --force       Only with --done: remove the worktree even when it has
+                uncommitted or untracked changes, discarding them. Commits
+                are never at risk — the branch is kept either way.
+  --all         Only with --list: also list every other sandbox on this
+                machine, whether or not task-agent created it.
   --help, -h    Show this help.
 ```
 
@@ -113,9 +131,18 @@ task-agent --init vaadin-claude
 
 | Preset | Contains |
 | --- | --- |
-| `generic` | `JAVA_HOME`, Maven and GitHub network access. Deliberately small. |
+| `generic` | `JAVA_HOME`, Maven and GitHub network access, and a Claude Code update. Deliberately small. |
 | `vaadin` | the above, plus the Vaadin skills and MCP, and Playwright browsers |
 | `vaadin-claude` | the above, plus general engineering skills and a status line showing context-window usage |
+
+All three update Claude Code when the sandbox is built. The sandbox template image bakes in whichever
+version was current when it was published, and nothing inside a sandbox ever refreshes it, so without
+this step an image a few weeks old means an agent a few weeks old. The step costs a few seconds per
+sandbox and cannot fail the build: if it cannot reach the network it gives up and the image's version
+is used.
+
+A long-lived sandbox still ages, because the step only runs at creation. `task-agent --done <branch>`
+followed by starting the task again rebuilds it on the current release.
 
 The presets themselves live in this repository under
 [`presets/`](presets/) and are downloaded from its default branch, so the file you read is the file
@@ -141,6 +168,28 @@ TASK_AGENT_KIT_URL=https://example.com/my-kit.yaml task-agent --init
 
 If a preset uses the `__PROJECT__` placeholder, `--init` replaces it with your project's directory
 name. A spec without the placeholder is copied byte for byte.
+
+#### Your project's own `.claude` comes along
+
+A linked worktree is a checkout of **tracked** files, and `.claude/` is usually untracked — at least
+`settings.local.json`, which is personal by convention. Left alone, an agent started by `task-agent`
+would run without the project's permission allowlist, slash commands or instructions, even though the
+same agent has them in your main checkout.
+
+So `task-agent <branch>` copies `.claude/` from your repository into the task's worktree, and
+`--done` removes those copies again just before removing the worktree.
+
+- **Gaps only.** A file already in the worktree is never overwritten — tracked, copied earlier, or
+  written by the agent, it is left as it is. Starting the same task again picks up anything you have
+  added since.
+- **Only identical copies are taken back out.** A file the agent changed stays, and stops `--done`
+  exactly as any other uncommitted change would, until you commit it or pass `--force`.
+- **Only `.claude`.** Nothing else is copied, and there is no setting to point it elsewhere.
+
+Turn it off with `TASK_AGENT_PROJECT_CONFIG=no`.
+
+This is your *project's* configuration. The agent's own configuration inside the sandbox — skills,
+MCP servers, the status line — is a separate thing, and comes from the kit:
 
 #### Agent configuration in the sandbox
 
@@ -210,6 +259,11 @@ A kit cannot publish ports; the kit schema has no `ports` field. Publish them on
 sbx ls                                        # find the sandbox name
 sbx ports agent-my-app-feature-x-a1b2c3 --publish 8080
 ```
+
+Since `sbx` v0.42.0 a published port listens on IPv4 only unless you name the protocol
+(`--publish 8080:8080/tcp` for dual-stack), which is what makes `http://localhost:8080` reach a dev
+server inside the sandbox that binds IPv4. The same version made `sbx ports --publish` start a stopped
+sandbox by itself, so the command above no longer has to be typed while the agent is running.
 
 Inside the sandbox, `localhost` is the sandbox itself. Services on your **host** are reachable as
 `host.docker.internal`, and the network rule for them is written with the loopback name — a rule for
@@ -295,6 +349,34 @@ There is no state file. What exists is rediscovered from `git worktree list` and
 inspect and clean up with plain `git` and `sbx` commands. The one thing written down — which Sandbox
 Kit a sandbox last got, under `.git/agent-cli/kit/` — is a cache that nothing depends on being there.
 
+### See what exists
+
+```bash
+task-agent --list
+```
+
+```
+BRANCH             SANDBOX                              WORKTREE
+feature/new-crud   agent-my-app-feature-new-crud-a84c9  /Users/me/projects/my-app-worktrees/feature-new-crud-a84c91
+spike/grid         -                                    /Users/me/projects/my-app-worktrees/spike-grid-1f0b2e
+-                  agent-my-app-old-branch-77c3de       -
+```
+
+One row per task, and a `-` where one side of it is missing: a worktree whose sandbox was removed, or
+a sandbox whose worktree was. Nothing is read from a file `task-agent` wrote — the table is built from
+`git worktree list` and `sbx ls` on the spot, which is exactly why it can show a half-torn-down task
+at all.
+
+The table goes to stdout, so it pipes:
+
+```bash
+task-agent --list | grep ' - '     # tasks missing a sandbox or a worktree
+```
+
+Sandboxes belonging to other projects are left out. `--list --all` adds them, along with every other
+sandbox on the machine, under an `OTHER SANDBOXES` heading — task-agent cannot tell which of those it
+once created, and does not guess.
+
 ### Tear down a task
 
 ```bash
@@ -307,7 +389,15 @@ idempotent: running it again when nothing is left just reports that.
 
 If the worktree has uncommitted or untracked changes, `--done` refuses to remove it (git's own
 worktree-removal safety check, not a separate one agent-cli adds) rather than silently discarding
-work. Commit, stash, or remove those changes and run it again.
+work. Commit, stash, or remove those changes and run it again — or, when the changes are genuinely
+scratch, discard them with `--force`:
+
+```bash
+task-agent --done feature/new-crud --force
+```
+
+`--force` affects the worktree's *files* only. Commits are never at risk: the branch is kept either
+way, and its ref keeps every commit reachable whether or not a worktree for it still exists.
 
 #### Your agent sessions are kept
 

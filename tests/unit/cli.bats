@@ -65,20 +65,37 @@ cli() {
 }
 
 @test "help does not mention commands from later phases" {
+  # --force left this list when issue #23 decided it in: it is now a documented
+  # option of --done, not a later phase.
   cli --help
   assert_success
   local flag
-  for flag in --submit --sync --status --shell --plan --force --rebuild; do
+  for flag in --submit --sync --status --shell --plan --rebuild; do
     assert_output_not_contains "$flag"
   done
 }
 
-@test "help documents --done, --update and --version" {
+@test "help documents --force as belonging to --done" {
+  cli --help
+  assert_success
+  assert_output_contains "--done <branch> [--force]"
+  assert_output_contains "Only with --done"
+}
+
+@test "help documents --done, --list, --update and --version" {
   cli --help
   assert_success
   assert_output_contains "--done"
+  assert_output_contains "--list"
   assert_output_contains "--update"
   assert_output_contains "--version"
+}
+
+@test "help documents --all as belonging to --list" {
+  cli --help
+  assert_success
+  assert_output_contains "task-agent --list [--all]"
+  assert_output_contains "Only with --list"
 }
 
 # --- version ----------------------------------------------------------------
@@ -126,7 +143,7 @@ cli() {
 @test "--version and --update together are rejected" {
   cli --version --update
   assert_failure
-  [[ "$stderr" == *"Only one of --init, --done, --update, --version may be given"* ]] ||
+  [[ "$stderr" == *"Only one of --init, --done, --list, --update, --version may be given"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 
@@ -196,6 +213,76 @@ cli() {
     fail "unexpected stderr: $stderr"
 }
 
+@test "--list with a branch name is rejected" {
+  cli --list feature/x
+  assert_failure
+  [[ "$stderr" == *"--list does not take a branch name"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--list with --base is rejected" {
+  cli --list --base develop
+  assert_failure
+  [[ "$stderr" == *"--base is not valid with --list"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--list with --force is rejected" {
+  cli --list --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --list"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--list and --done together are rejected" {
+  cli --list --done feature/x
+  assert_failure
+  [[ "$stderr" == *"Only one of --init, --done, --list, --update, --version"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--all without --list is rejected" {
+  cli feature/x --all
+  assert_failure
+  [[ "$stderr" == *"--all is only valid with --list"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--all with --done is rejected" {
+  cli --done feature/x --all
+  assert_failure
+  [[ "$stderr" == *"--all is only valid with --list"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force without --done is rejected" {
+  cli feature/x --force
+  assert_failure
+  [[ "$stderr" == *"--force is only valid with --done"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force with --init is rejected" {
+  cli --init --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --init"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force with --update is rejected" {
+  cli --update --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --update"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--force with --version is rejected" {
+  cli --version --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --version"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
 @test "--done without a branch name is rejected" {
   cli --done
   assert_failure
@@ -212,7 +299,7 @@ cli() {
 @test "--done and --init together are rejected" {
   cli --done --init
   assert_failure
-  [[ "$stderr" == *"Only one of --init, --done, --update, --version may be given"* ]] ||
+  [[ "$stderr" == *"Only one of --init, --done, --list, --update, --version may be given"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 
@@ -233,7 +320,7 @@ cli() {
 @test "--update and --done together are rejected" {
   cli --update --done feature/x
   assert_failure
-  [[ "$stderr" == *"Only one of --init, --done, --update, --version may be given"* ]] ||
+  [[ "$stderr" == *"Only one of --init, --done, --list, --update, --version may be given"* ]] ||
     fail "unexpected stderr: $stderr"
 }
 
