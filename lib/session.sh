@@ -32,6 +32,7 @@ session_start() {
   # Validated up front, before anything is created: an invalid setting must
   # cost a re-run, never a half-built task.
   transcripts_validate_mode
+  projectconfig_validate_mode
 
   git_validate_branch "$branch"
   git_validate_branch "$base"
@@ -53,6 +54,13 @@ session_start() {
   local worktree
   worktree="$(worktree_ensure "$main_root" "$branch")" || exit 1
   info "Worktree: $worktree"
+
+  # A fresh worktree holds tracked files only, so an untracked .claude/ — which
+  # is the usual shape — would be missing from the very directory the sandbox
+  # mounts. Gaps are filled every start, never overwritten. A failure here is
+  # reported but not fatal: a task with incomplete project configuration is
+  # still a task, and refusing to start would be the worse outcome.
+  projectconfig_seed "$main_root" "$worktree" || true
 
   local project sandbox
   project="$(naming_project_id "$main_root")"
@@ -215,6 +223,7 @@ session_done() {
   # Validated up front, before anything is removed: an invalid setting must
   # cost a re-run, never a half-torn-down task.
   transcripts_validate_mode
+  projectconfig_validate_mode
 
   git_validate_branch "$branch"
 
@@ -243,6 +252,12 @@ session_done() {
 
   local worktree
   if worktree="$(worktree_find_for_branch "$main_root" "$branch")"; then
+    # Remove the seeded copies first, so they cannot be the untracked files
+    # that make git refuse — that would make --force the habit rather than the
+    # exception. Never allowed to block the teardown, and it can lose nothing:
+    # a file it deletes is byte-identical to one still in the main repository.
+    projectconfig_prune "$main_root" "$worktree" || true
+
     if [[ "$force" == "force" ]]; then
       warning "Discarding any uncommitted and untracked changes in: $worktree"
     fi

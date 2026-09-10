@@ -58,6 +58,8 @@ lib/transcripts.sh   rescuing the agent's *.jsonl session transcripts out of a s
                      host, immediately before the sandbox is destroyed
 lib/listing.sh       `--list`: the read-only view of what exists, related from `git worktree list`
                      and `sbx ls -q` alone
+lib/projectconfig.sh carrying the project's own .claude/ into a task's worktree, and taking the
+                     copies back out before the worktree is removed
 lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
@@ -417,7 +419,55 @@ name changes no behaviour.
 and `TASK_AGENT_PRESET_BASE_URL` must point at this repository. Add a preset by adding both the table
 entry and the file — the test fails if you add only one.
 
+## How the project's own .claude reaches the sandbox
+
+`git worktree add` checks out **tracked** files, and a project's `.claude/` is usually untracked —
+at least `settings.local.json`, which is personal by convention. So a task's worktree had no
+`.claude/` at all, and since the sandbox mounts that worktree at its host path, the agent inside
+started without the project's permissions, commands or overrides (issue #24,
+[ADR 0004](docs/adr/0004-project-claude-config-is-copied-into-the-worktree.md)).
+
+`lib/projectconfig.sh` fills that gap by copying, because copying is the only option that puts the
+files where Claude Code actually looks: it reads project settings from `<cwd>/.claude`, so mounting
+the main repository's `.claude` somewhere else would be read by nothing.
+
+Two entry points, deliberately symmetric — `projectconfig_seed` from `session_start`, right after
+`worktree_ensure`, and `projectconfig_prune` from `session_done`, right before `worktree_remove`.
+
+Five rules hold it together:
+
+1. **Nothing is ever overwritten, and nothing is ever deleted by the seed.** It fills gaps. That is
+   what makes it safe on *every* start rather than only the one that created the worktree: a
+   restarted task picks up configuration added since, and a file the agent changed is left alone.
+2. **The prune re-derives what to remove and never guesses.** A file goes only when the main
+   repository has one at the same relative path, the two are byte-identical, and git does not track
+   it in the worktree. Nothing is written down about what was copied — architectural rule 1 holds,
+   and a changed copy is recognised as the agent's by being different.
+3. **The prune is what keeps `--force` exceptional.** Untracked files make `git worktree remove`
+   refuse, so without it every `--done` of such a project would need `--force` — and a user in the
+   habit of passing `--force` eventually loses real work with it. `tests/integration/projectconfig.bats`
+   has the test for this, verified to fail when the prune is removed.
+4. **Neither step may fail a task.** Both are called with `|| true`, like the transcript rescue.
+5. **It is `.claude` and nothing else.** Not a general file-copying feature, not configurable to
+   another path. `TASK_AGENT_PROJECT_CONFIG` is `yes` (the default) or `no`, validated early in both
+   `session_start` and `session_done`, and a typo fails rather than reading as "off" — the same
+   vocabulary and the same strictness as `TASK_AGENT_KIT_RECREATE`.
+
+This does **not** loosen ADR 0003 below: that is about the agent's configuration *inside* a sandbox
+(`~/.claude`, skills, MCP, the status line), which is still kit content task-agent never writes.
+This is the project's own configuration, which lives in the repository and is missing only because
+of how a worktree is built. task-agent still knows nothing about Claude's configuration format — it
+copies opaque files.
+
+Note the machine-dependence: where `.claude` is in the developer's **global** gitignore it was never
+dirt to begin with and the prune is invisible; where it is not, the prune is the difference between
+`--done` working and refusing. Tests must neutralise `core.excludesFile`, or they only pass on the
+first kind of machine.
+
 ## How agent configuration reaches the sandbox
+
+This section is about the agent's configuration *inside* a sandbox. For the *project's* `.claude/`,
+which is a different thing with a different answer, see the section above.
 
 Skills and Claude Code configuration are **kit content, not a task-agent feature** (issue #20,
 `docs/adr/0003-agent-configuration-lives-in-the-preset-kit.md`). `--init` still writes

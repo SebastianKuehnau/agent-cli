@@ -162,6 +162,28 @@ TASK_AGENT_KIT_URL=https://example.com/my-kit.yaml task-agent --init
 If a preset uses the `__PROJECT__` placeholder, `--init` replaces it with your project's directory
 name. A spec without the placeholder is copied byte for byte.
 
+#### Your project's own `.claude` comes along
+
+A linked worktree is a checkout of **tracked** files, and `.claude/` is usually untracked — at least
+`settings.local.json`, which is personal by convention. Left alone, an agent started by `task-agent`
+would run without the project's permission allowlist, slash commands or instructions, even though the
+same agent has them in your main checkout.
+
+So `task-agent <branch>` copies `.claude/` from your repository into the task's worktree, and
+`--done` removes those copies again just before removing the worktree.
+
+- **Gaps only.** A file already in the worktree is never overwritten — tracked, copied earlier, or
+  written by the agent, it is left as it is. Starting the same task again picks up anything you have
+  added since.
+- **Only identical copies are taken back out.** A file the agent changed stays, and stops `--done`
+  exactly as any other uncommitted change would, until you commit it or pass `--force`.
+- **Only `.claude`.** Nothing else is copied, and there is no setting to point it elsewhere.
+
+Turn it off with `TASK_AGENT_PROJECT_CONFIG=no`.
+
+This is your *project's* configuration. The agent's own configuration inside the sandbox — skills,
+MCP servers, the status line — is a separate thing, and comes from the kit:
+
 #### Agent configuration in the sandbox
 
 `task-agent` writes no agent configuration — no `.claude/settings.json`, no `CLAUDE.md`, no MCP file.
