@@ -264,6 +264,20 @@ expected_sandbox() {
   assert_output_contains "feature/new-crud"
 }
 
+@test "--list stops instead of showing every sandbox as missing" {
+  # A daemon that is not running makes `sbx ls` fail. Printing the table anyway
+  # would show every task with a "-" sandbox — indistinguishable from a project
+  # whose sandboxes really were removed by hand.
+  task feature/new-crud
+  assert_success
+
+  run --separate-stderr env FAKE_SBX_LS_EXIT=1 bash -c \
+    "cd '$REPO' && '$TASK_AGENT' --list"
+  assert_failure
+  [[ "$stderr" == *"did not answer"* ]] || fail "unexpected stderr: $stderr"
+  assert_output_not_contains "feature/new-crud"
+}
+
 @test "--list needs a git repository" {
   local outside="$TMP/not-a-repo"
   mkdir -p "$outside"

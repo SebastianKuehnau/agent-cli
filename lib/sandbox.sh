@@ -32,11 +32,27 @@ sandbox_require_cli() {
 # `sbx ls -q` prints one sandbox name per line, which is why agent-cli needs no
 # JSON parser. Docker Sandboxes is the source of truth for sandbox existence —
 # agent-cli keeps no session state of its own.
+#
+# The listing's exit status is checked rather than discarded, because "sbx could
+# not answer" and "that sandbox is not there" are different answers and reading
+# the first as the second is silently wrong: with the daemon down, `--done`
+# would report success while the sandbox and its transcripts lived on. Output
+# and status are captured before the output is split, so the status is not
+# swallowed by a pipeline or a process substitution — the same reason
+# transcripts_list captures first. stderr is deliberately not redirected: sbx's
+# own message is what explains the failure, exactly as for sandbox_create.
+#
+# `die` is correct here: every caller tests this function directly, never inside
+# a command substitution, so there is no subshell for the exit to be lost in.
 sandbox_exists() {
-  local name="$1" line
+  local name="$1" out status line
+  out="$(sbx ls -q)"
+  status=$?
+  ((status == 0)) || sandbox_die_unreachable "$status"
+
   while IFS= read -r line; do
     [[ "$line" == "$name" ]] && return 0
-  done < <(sbx ls -q 2>/dev/null)
+  done <<<"$out"
   return 1
 }
 
@@ -45,8 +61,22 @@ sandbox_exists() {
 # Every sandbox the runtime knows about, one name per line — the same `sbx ls
 # -q` sandbox_exists asks, for the caller that needs the whole set rather than
 # one answer (lib/listing.sh). Kept here so `sbx` stays invoked from one module.
+#
+# This one returns sbx's exit status instead of dying on it: its caller reads
+# the names through a command substitution, and a `die` in a subshell would only
+# kill the subshell. The caller must check the status and call
+# sandbox_die_unreachable itself.
 sandbox_list_names() {
-  sbx ls -q 2>/dev/null
+  sbx ls -q
+}
+
+# sandbox_die_unreachable <status>
+#
+# One wording for "the runtime did not answer", shared by every caller of the
+# two functions above so the message cannot drift between them.
+sandbox_die_unreachable() {
+  die "Docker Sandboxes did not answer: 'sbx ls' exited with status $1." \
+    "The sbx output above should explain why; 'sbx version' shows whether the daemon is running."
 }
 
 # sandbox_build_create_argv <name> <kit-dir> <workspace> [extra-workspace...]

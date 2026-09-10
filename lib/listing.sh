@@ -71,10 +71,19 @@ listing_run() {
 # branches with worktrees is unbounded.
 listing_load_sandboxes() {
   AGENT_LISTING_KNOWN=()
-  local line
+
+  # Captured before it is split, and the status checked: a listing that shows
+  # every task with a missing sandbox because the daemon is down looks exactly
+  # like a project whose sandboxes were all removed by hand. A view that cannot
+  # tell those apart must stop rather than print the wrong one.
+  local out status line
+  out="$(sandbox_list_names)"
+  status=$?
+  ((status == 0)) || sandbox_die_unreachable "$status"
+
   while IFS= read -r line; do
     [[ -n "$line" ]] && AGENT_LISTING_KNOWN+=("$line")
-  done < <(sandbox_list_names)
+  done <<<"$out"
 }
 
 # listing_known_has <sandbox-name> — does the runtime report this sandbox?

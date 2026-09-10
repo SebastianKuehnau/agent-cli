@@ -122,6 +122,29 @@ sbx_subcommands() {
   [[ "$stderr" == *"No worktree found"* ]] || fail "unexpected stderr: $stderr"
 }
 
+@test "--done stops instead of reporting success when the runtime is unreachable" {
+  # The worst shape of reading a failed listing as "not there": --done would
+  # skip the rescue and the removal, remove the worktree, and still end with
+  # "Branch ... was kept" while the sandbox and its transcripts lived on.
+  task feature/new-crud
+  assert_success
+
+  local wt
+  wt="$(expected_worktree feature/new-crud)"
+
+  run --separate-stderr env FAKE_SBX_LS_EXIT=1 bash -c \
+    "cd '$REPO' && '$TASK_AGENT' --done feature/new-crud"
+  assert_failure
+  [[ "$stderr" == *"did not answer"* ]] || fail "unexpected stderr: $stderr"
+  [[ "$stderr" != *"No sandbox found"* ]] || fail "read the failure as absence: $stderr"
+  [[ "$stderr" != *"was kept"* ]] || fail "claimed the task was torn down: $stderr"
+
+  # Nothing was torn down, so both sides are still there to try again with.
+  assert_file_exists "$wt/README.md"
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_output_contains "agent-my-app-feature-new-crud"
+}
+
 @test "--done removes an orphaned sandbox even if the worktree is already gone" {
   task feature/new-crud
   assert_success

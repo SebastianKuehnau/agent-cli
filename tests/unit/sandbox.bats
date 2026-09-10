@@ -62,6 +62,42 @@ setup() {
   assert_success
 }
 
+@test "a listing that fails is not read as a missing sandbox" {
+  # With no daemon, `sbx ls` exits non-zero. Treating that as "not there" is how
+  # --done came to report success while the sandbox lived on.
+  run --separate-stderr env FAKE_SBX_LS_EXIT=1 bash -c "
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/sandbox.sh'
+    sandbox_exists 'agent-x-123456'
+  "
+  assert_failure
+  [[ "$stderr" == *"did not answer"* ]] || fail "unexpected stderr: $stderr"
+  [[ "$stderr" == *"'sbx ls' exited with status 1"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "a listing that fails is not read as a missing sandbox even when it is listed" {
+  fake_sbx_add_sandbox "agent-x-123456"
+  run --separate-stderr env FAKE_SBX_LS_EXIT=1 bash -c "
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/sandbox.sh'
+    sandbox_exists 'agent-x-123456'
+  "
+  assert_failure
+  [[ "$stderr" == *"did not answer"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "sandbox_list_names returns sbx's exit status instead of dying" {
+  # Its caller reads the names through a command substitution, where a die
+  # would only kill the subshell — so the status has to survive the call.
+  run --separate-stderr env FAKE_SBX_LS_EXIT=3 bash -c "
+    source '$AGENT_LIB/logging.sh'
+    source '$AGENT_LIB/sandbox.sh'
+    sandbox_list_names >/dev/null
+  "
+  assert_failure 3
+}
+
 # --- create argv ------------------------------------------------------------
 
 @test "create argv has the expected shape" {

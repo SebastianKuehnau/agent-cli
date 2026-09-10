@@ -178,6 +178,11 @@ make_bare_origin() {
 # into $dir/calls.log so tests can assert on argument boundaries. The list of
 # sandboxes it reports comes from $dir/sandboxes (one name per line), and the
 # in-sandbox transcript paths `sbx exec` reports from $dir/transcripts.
+#
+# FAKE_SBX_EXIT makes every subcommand fail; FAKE_SBX_LS_EXIT,
+# FAKE_SBX_CREATE_EXIT, FAKE_SBX_EXEC_EXIT, FAKE_SBX_CP_EXIT and
+# FAKE_SBX_KIT_EXIT fail one of them, which is what a test wanting "create
+# failed" rather than "the runtime is unreachable" needs.
 make_fake_sbx() {
   local dir="$1"
   mkdir -p "$dir/bin"
@@ -195,7 +200,16 @@ log="${FAKE_SBX_DIR}/calls.log"
 
 case "$1" in
   ls)
+    # A listing that cannot answer exits non-zero and explains itself on
+    # stderr, the way the real sbx does with no daemon running. task-agent must
+    # tell that apart from "no sandboxes", so it has to be reproducible here.
+    ls_exit="${FAKE_SBX_LS_EXIT:-${FAKE_SBX_EXIT:-0}}"
+    if [[ "$ls_exit" != 0 ]]; then
+      printf 'fake sbx: the sandboxd daemon is not running\n' >&2
+      exit "$ls_exit"
+    fi
     cat "${FAKE_SBX_DIR}/sandboxes" 2>/dev/null
+    exit 0
     ;;
   create)
     # Register the sandbox so a follow-up existence check succeeds.
@@ -205,6 +219,7 @@ case "$1" in
       shift
     done
     [[ -n "$name" ]] && printf '%s\n' "$name" >>"${FAKE_SBX_DIR}/sandboxes"
+    exit "${FAKE_SBX_CREATE_EXIT:-${FAKE_SBX_EXIT:-0}}"
     ;;
   rm)
     # Deregister the sandbox so a follow-up existence check fails.

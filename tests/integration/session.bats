@@ -639,7 +639,9 @@ arg:run"
 }
 
 @test "a sandbox creation failure is reported and not silently ignored" {
-  run --separate-stderr env FAKE_SBX_EXIT=1 bash -c \
+  # Only `create` fails: a wholesale FAKE_SBX_EXIT would already stop the run at
+  # the existence check, which is a different failure with a different message.
+  run --separate-stderr env FAKE_SBX_CREATE_EXIT=1 bash -c \
     "cd '$REPO' && '$TASK_AGENT' feature/new-crud"
   assert_failure
   [[ "$stderr" == *"Failed to create the sandbox"* ]] ||
