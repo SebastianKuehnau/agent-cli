@@ -75,11 +75,19 @@ sandbox_build_create_argv() {
 
 # sandbox_build_attach_argv <name>
 #
-# `sbx run --name X` re-attaches to an existing sandbox and reads the agent from
-# that sandbox's stored spec, so the agent and the workspaces do not have to be
-# repeated.
+# `sbx run --name X` re-attaches to an existing sandbox and reads the agent and
+# the workspaces from that sandbox's stored spec, so the workspaces do not have
+# to be repeated.
+#
+# The agent *is* repeated, on purpose. `sbx run --name X` alone attaches to
+# whatever carries that name; naming the agent as well makes sbx verify the
+# sandbox's stored agent against it ("Re-attach to an existing sandbox by name
+# and verify the expected agent" — `sbx run --help`, v0.42.1). Without it a
+# sandbox that happens to match the derived name — made by hand, by another
+# tool, or for another agent — is silently attached to instead of refused.
+# tests/spike/sandbox-attach.bats checks this against the real CLI.
 sandbox_build_attach_argv() {
-  AGENT_SBX_ARGV=(sbx run --name "$1")
+  AGENT_SBX_ARGV=(sbx run "$AGENT_SBX_AGENT" --name "$1")
 }
 
 # sandbox_create <name> <kit-dir> <workspace> [extra-workspace...]

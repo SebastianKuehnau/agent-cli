@@ -147,14 +147,21 @@ setup() {
 
 # --- attach argv ------------------------------------------------------------
 
-@test "attach argv re-attaches by name only" {
+@test "attach argv re-attaches by name and names the agent" {
   sandbox_build_attach_argv "agent-my-app-feature-x-abc123"
-  assert_argv sbx run --name "agent-my-app-feature-x-abc123"
+  assert_argv sbx run claude --name "agent-my-app-feature-x-abc123"
 }
 
 @test "attach argv keeps a name containing hyphens intact" {
   sandbox_build_attach_argv "agent-a-b-c-d-e-123456"
-  assert_argv sbx run --name "agent-a-b-c-d-e-123456"
+  assert_argv sbx run claude --name "agent-a-b-c-d-e-123456"
+}
+
+@test "attach argv repeats no workspace" {
+  # The workspaces come from the sandbox's own spec. Only the agent is repeated,
+  # and only so that sbx verifies it against the sandbox's stored agent.
+  sandbox_build_attach_argv "agent-my-app-feature-x-abc123"
+  assert_equal "${#AGENT_SBX_ARGV[@]}" "5"
 }
 
 # --- execution --------------------------------------------------------------
