@@ -20,7 +20,13 @@
 #   - the changed kit's content takes effect;
 #   - files in the container survive, in $HOME and outside it — the swap
 #     container runs from an image committed from the old one;
-#   - the workspace is still the host's bind mount.
+#   - the workspace is still the host's bind mount;
+#   - the network allowlist is replaced too: the old kit's hosts are denied,
+#     the new kit's allowed;
+#   - the new kit's setup.install steps run, on top of the kept container, and
+#     on *every* `sbx kit add` — an unchanged step runs again, and a removed
+#     step's effects stay. Unlike a fresh sandbox, the result depends on
+#     history, so every install step would have to be idempotent.
 #
 # Whether task-agent should switch to it is not decided here; see issue #37.
 # The help text still says "appended to its original kit list", and the
@@ -70,17 +76,28 @@ teardown() {
 # write_kit <description> [value]
 #
 # <value> lands in SPIKE_VALUE inside the sandbox, which is how a test sees
-# which version of the kit a sandbox is running.
+# which version of the kit a sandbox is running. It also names the one host
+# the kit allows, and the setup step appends it to /tmp/spike-setup.log, so a
+# test can see which network rules and which install steps are in effect.
 write_kit() {
+  local value="${2:-one}"
   cat >"$KIT_DIR/spec.yaml" <<EOF
 schemaVersion: "2"
 kind: mixin
 name: agent-cli-spike
 displayName: agent-cli sandbox-kit spike
 description: $1
+setup:
+  install:
+    - command: "echo $value >> /tmp/spike-setup.log"
+      user: "1000"
 environment:
   variables:
-    SPIKE_VALUE: "${2:-one}"
+    SPIKE_VALUE: "$value"
+permissions:
+  network:
+    allow:
+      - agent-cli-spike-$value.example.com
 EOF
 }
 
@@ -158,6 +175,46 @@ kit_entries() {
   run sbx exec "$SANDBOX" sh -c "printf 'from sandbox\\n' > '$REPO/after-kit-add.txt'"
   assert_success
   assert_equal "$(cat "$REPO/after-kit-add.txt")" "from sandbox"
+}
+
+# network_decision <value> — Allowed or Denied, for the host kit <value> allows.
+network_decision() {
+  sbx policy check network --sandbox "$SANDBOX" "agent-cli-spike-$1.example.com" |
+    grep -oE 'Allowed|Denied' | head -1
+}
+
+@test "sbx kit add replaces the network allowlist" {
+  create_sandbox
+  assert_equal "$(network_decision one)" "Allowed"
+  assert_equal "$(network_decision two)" "Denied"
+
+  write_kit "edited after the sandbox existed" "two"
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+
+  assert_equal "$(network_decision one)" "Denied"
+  assert_equal "$(network_decision two)" "Allowed"
+}
+
+@test "sbx kit add runs the new kit's install steps on top of the kept container" {
+  create_sandbox
+  write_kit "edited after the sandbox existed" "two"
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+
+  # "one" is the first kit's step, kept with the container; "two" ran on add.
+  run sbx exec "$SANDBOX" cat /tmp/spike-setup.log
+  assert_success
+  assert_equal "${output//$'\r'/}" $'one\ntwo'
+}
+
+@test "sbx kit add runs an unchanged install step again" {
+  create_sandbox
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+
+  # A fresh sandbox would have run it once. This is why install steps would
+  # have to be idempotent before session_sync_kit could use sbx kit add.
+  run sbx exec "$SANDBOX" cat /tmp/spike-setup.log
+  assert_success
+  assert_equal "${output//$'\r'/}" $'one\none'
 }
 
 # --- what task-agent actually does ------------------------------------------
