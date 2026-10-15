@@ -66,7 +66,8 @@ mv ~/.local/bin/agent-task ~/.local/bin/task-agent
 Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
-  task-agent --done <branch> [--force]
+  task-agent <branch> --fork
+  task-agent --done <branch> [--fork] [--force]
   task-agent --here
   task-agent --done --here
   task-agent --list [--all]
@@ -105,6 +106,11 @@ Commands:
 Options:
   --base        Base branch for a newly created branch. Default: main.
                 Ignored when the branch already exists.
+  --fork        Work on <branch>-fork instead, a new branch created from the
+                tip of <branch>: a parallel task on top of it, also for the
+                branch checked out in the main checkout. An existing fork is
+                reused as it is, not synced. Uncommitted changes are not
+                part of it. With --done: tear down <branch>-fork.
   --force       Only with --done: remove the worktree even when it has
                 uncommitted or untracked changes, discarding them. Commits
                 are never at risk — the branch is kept either way.
@@ -418,6 +424,36 @@ task-agent --done --here
 This rescues its transcripts and removes the sandbox. Your checkout is not touched. Inside a task's
 worktree it is refused, because it would delete the directory you are standing in; run
 `task-agent --done <branch>` from the main checkout instead.
+
+### Run a task on top of a branch: `--fork`
+
+A task needs a branch of its own, and git allows a branch in only one worktree. So `task-agent
+<branch>` refuses the branch checked out in your main checkout, and tells you what to do instead:
+
+```text
+[task-agent] error: 'feature/x' is checked out in the main checkout, which is never a task's worktree:
+  /Users/me/projects/my-app
+To work on it there, beside your IDE, start the workbench:
+  task-agent --here
+To run a parallel task on top of it, fork it:
+  task-agent feature/x --fork
+```
+
+`--here` works on that branch in place, in the workbench. `--fork` runs a parallel task on top of it:
+
+```bash
+task-agent feature/x --fork          # a task on feature/x-fork, created from the tip of feature/x
+task-agent --done feature/x --fork   # tear it down again; both branches are kept
+```
+
+The fork is an ordinary task on `feature/x-fork`, and works for any existing branch, not only the
+checked-out one. Three things to know:
+
+- **It starts from the last commit** on `feature/x`. Uncommitted changes in your checkout are not part
+  of it; `task-agent` says so when there are any, and never stashes, copies or commits them.
+- **It is not kept in sync.** Running `--fork` again reuses the existing `feature/x-fork` as it is, even
+  after `feature/x` moved on. Merge or rebase it yourself when you want to.
+- **Nothing remembers where it came from.** `task-agent --done feature/x-fork` works just as well.
 
 ### See what exists
 

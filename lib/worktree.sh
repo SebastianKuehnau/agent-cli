@@ -96,6 +96,18 @@ worktree_branch_at_path() {
   return 1
 }
 
+# worktree_is_main_checkout <main-repo-root> <path>
+#
+# Is <path> the main checkout itself? `git worktree list` reports the main
+# checkout alongside the linked worktrees, so worktree_find_for_branch returns
+# it for the branch checked out there. The main checkout is never a task's
+# worktree (issue #36), and callers use this to refuse that case. Both sides
+# are physical paths from git (architectural rule 10), so a string comparison
+# with trailing slashes stripped is enough.
+worktree_is_main_checkout() {
+  [[ "${2%/}" == "${1%/}" ]]
+}
+
 # worktree_ensure <main-repo-root> <branch>
 #
 # Print the path of the worktree to use for <branch>, creating it if needed.

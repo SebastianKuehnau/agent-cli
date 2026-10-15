@@ -78,7 +78,7 @@ cli() {
 @test "help documents --force as belonging to --done" {
   cli --help
   assert_success
-  assert_output_contains "--done <branch> [--force]"
+  assert_output_contains "--done <branch> [--fork] [--force]"
   assert_output_contains "Only with --done"
 }
 
@@ -408,6 +408,70 @@ cli() {
     [[ "$stderr" == *"--here is only valid on its own or with --done"* ]] ||
       fail "unexpected stderr for $mode: $stderr"
   done
+}
+
+# --- --fork ---------------------------------------------------------------
+
+@test "help documents --fork" {
+  cli --help
+  assert_success
+  assert_output_contains "task-agent <branch> --fork"
+  assert_output_contains "--done <branch> [--fork] [--force]"
+}
+
+@test "--fork without a branch name is rejected" {
+  cli --fork
+  assert_failure
+  [[ "$stderr" == *"--fork needs a branch name"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "--fork with --base is rejected" {
+  cli feature/x --fork --base develop
+  assert_failure
+  [[ "$stderr" == *"--fork is not valid with --base"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "--fork with --here is rejected" {
+  cli --here --fork
+  assert_failure
+  [[ "$stderr" == *"--fork is not valid with --here"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "--fork with --init, --list, --update or --version is rejected, each by name" {
+  local mode
+  for mode in --init --list --update --version; do
+    cli "$mode" --fork
+    assert_failure
+    [[ "$stderr" == *"--fork is not valid with $mode"* ]] ||
+      fail "unexpected stderr for $mode: $stderr"
+  done
+}
+
+@test "--fork with --force but without --done is rejected" {
+  cli feature/x --fork --force
+  assert_failure
+  [[ "$stderr" == *"--force is only valid with --done"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "--fork of a missing branch fails with nothing to fork" {
+  cli feature/missing --fork
+  assert_failure
+  [[ "$stderr" == *"nothing to fork"* ]] || fail "unexpected stderr: $stderr"
+  run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/missing-fork
+  assert_failure
+}
+
+@test "--fork of an existing branch is accepted and reaches the kit check" {
+  git_quiet -C "$REPO" branch feature/x
+  cli feature/x --fork
+  assert_failure
+  [[ "$stderr" == *"No Sandbox Kit found"* ]] || fail "did not reach the kit check: $stderr"
+}
+
+@test "--done <branch> --fork tears down the derived branch" {
+  cli --done feature/x --fork
+  assert_success
+  [[ "$stderr" == *"feature/x-fork"* ]] || fail "derived name not used: $stderr"
 }
 
 # --- acceptance -------------------------------------------------------------

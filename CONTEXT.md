@@ -25,6 +25,11 @@ Unlike a task it owns no branch and no worktree: switching branches in the main 
 the workbench's agent sees. It persists between invocations, so a quick question does not pay for a
 new sandbox. A workbench is not a task; tasks remain the way to run work in parallel.
 
+**Fork** — a task whose branch was derived from another branch's tip: `task-agent <branch> --fork`
+works on `<branch>-fork`. It is how to run a parallel task on top of a branch, including the one
+checked out in the main checkout, which is never a task's worktree. A fork is a task like any other:
+nothing links it back to the branch it came from, and it is not kept in sync with it.
+
 **Agent** — the AI coding tool running inside the sandbox. Currently always Claude Code.
 
 **Transcript** — the record of one agent session, belonging to the agent rather than to agent-cli. It

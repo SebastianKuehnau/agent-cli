@@ -44,6 +44,21 @@ session_start() {
   # Fail before creating anything if the project has not been initialised.
   scaffold_require_kit "$main_root"
 
+  # The main checkout is never a task's worktree (issue #36). Git reports it
+  # alongside the linked worktrees, so without this a task for the branch
+  # checked out there would mount the developer's own checkout — the
+  # workbench's directory — as if it were a worktree of its own.
+  local registered
+  if registered="$(worktree_find_for_branch "$main_root" "$branch")" &&
+    worktree_is_main_checkout "$main_root" "$registered"; then
+    die "'$branch' is checked out in the main checkout, which is never a task's worktree:" \
+      "  $main_root" \
+      "To work on it there, beside your IDE, start the workbench:" \
+      "  task-agent --here" \
+      "To run a parallel task on top of it, fork it:" \
+      "  task-agent $branch --fork"
+  fi
+
   local branch_state
   branch_state="$(git_ensure_branch "$main_root" "$branch" "$base")" || exit 1
   case "$branch_state" in
@@ -236,6 +251,22 @@ session_done() {
   local main_root
   main_root="$(git_main_repo_root)" || exit 1
 
+  # Looked up before anything is removed: the main checkout is never a task's
+  # worktree (issue #36), so if git reports it for this branch, only a sandbox
+  # left over from before that rule can be torn down here — never the checkout.
+  local worktree="" on_main=""
+  if worktree="$(worktree_find_for_branch "$main_root" "$branch")"; then
+    worktree_is_main_checkout "$main_root" "$worktree" && on_main=1
+  else
+    worktree=""
+  fi
+
+  if [[ -n "$on_main" && "$force" == "force" ]]; then
+    die "--force is not valid here: '$branch' is checked out in the main checkout," \
+      "which task-agent never removes:" \
+      "  $main_root"
+  fi
+
   local project sandbox
   project="$(naming_project_id "$main_root")"
   sandbox="$(naming_sandbox_name "$project" "$branch")"
@@ -256,8 +287,11 @@ session_done() {
   # already has this kit.
   kit_cache_remove "$main_root" "$sandbox"
 
-  local worktree
-  if worktree="$(worktree_find_for_branch "$main_root" "$branch")"; then
+  if [[ -n "$on_main" ]]; then
+    warning "'$branch' is checked out in the main checkout, which is never a task's worktree."
+    warning "It was left untouched: $main_root"
+    warning "To remove the workbench on it instead, run: task-agent --done --here"
+  elif [[ -n "$worktree" ]]; then
     # Remove the seeded copies first, so they cannot be the untracked files
     # that make git refuse — that would make --force the habit rather than the
     # exception. Never allowed to block the teardown, and it can lose nothing:
@@ -400,4 +434,54 @@ session_workbench_done() {
   kit_cache_remove "$main_root" "$sandbox"
 
   success "The main checkout was not touched."
+}
+
+# session_fork <branch>
+#
+# `task-agent <branch> --fork` (issue #36): an ordinary task on the derived
+# branch `<branch>-fork`, created from the tip of <branch>. It is how to run a
+# parallel task on top of a branch — including the one checked out in the main
+# checkout, which session_start refuses as a task of its own.
+#
+# The fork is a task like any other. Nothing records what it was forked from
+# (architectural rule 1), an existing fork is reused untouched rather than
+# re-synced onto <branch>'s new tip (rule 4), and uncommitted changes in the
+# main checkout are not part of it — they are reported, never stashed, copied
+# or committed.
+session_fork() {
+  local branch="$1"
+
+  git_require_git
+  git_require_repo
+  sandbox_require_cli
+
+  git_validate_branch "$branch"
+  local fork
+  fork="$(naming_fork_branch "$branch")"
+  git_validate_branch "$fork"
+
+  local main_root
+  main_root="$(git_main_repo_root)" || exit 1
+
+  # Checked here rather than left to git_resolve_base: a missing base there
+  # reads as a --base problem, and --fork has no --base. <branch> itself is
+  # never created as a side effect.
+  git_local_branch_exists "$main_root" "$branch" ||
+    git_remote_branch_exists "$main_root" "$branch" ||
+    die "'$branch' does not exist locally or as origin/$branch, so there is nothing to fork."
+
+  if git_local_branch_exists "$main_root" "$fork"; then
+    info "Reusing the existing fork '$fork' as it is; it is not synced with '$branch'."
+  fi
+
+  local registered
+  if registered="$(worktree_find_for_branch "$main_root" "$branch")" &&
+    worktree_is_main_checkout "$main_root" "$registered" &&
+    [[ -n "$(git -C "$main_root" status --porcelain 2>/dev/null)" ]]; then
+    info "The main checkout has uncommitted changes. They are not part of the fork,"
+    info "which starts from the last commit on '$branch'."
+  fi
+
+  # The base is explicit, never HEAD (architectural rule 3): <branch> itself.
+  session_start "$fork" "$branch"
 }

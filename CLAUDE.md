@@ -11,8 +11,8 @@ original scaffold and is not used by the build or the tests.
 `--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), and
 `--version` by a further one (issue #6, which needed a version to compare), which is why none of them
 are in the Phase 1 exclusion list under "Scope discipline" below. `--done --force` joined them by
-issue #23, `--list` by issue #25, and `--here` / `--done --here` by issue #34. Everything else in
-that list still applies.
+issue #23, `--list` by issue #25, `--here` / `--done --here` by issue #34, and `--fork` by issue
+#36. Everything else in that list still applies.
 
 Issue #18 added the transcript rescue. It adds no flag and no argument: it is a step inside the two
 teardown paths that already existed. A standalone `--rescue` was considered and deliberately left out
@@ -101,7 +101,9 @@ These are load-bearing. Breaking one of them breaks the tool's core guarantees.
    to `main`. If the base does not exist locally or as `origin/<base>`, fail — do not fall back.
 4. **An existing branch is reused untouched.** No reset, no rebase, no merge of the base into it.
 5. **Git's registered worktree information is the source of truth.** If a branch already has a
-   worktree, reuse that path even when it differs from the derived one.
+   worktree, reuse that path even when it differs from the derived one — **unless it is the main
+   checkout, which is never a task's worktree** (issue #36,
+   [ADR 0006](docs/adr/0006-main-checkout-is-never-a-task-worktree.md)).
 6. **Parse `git worktree list --porcelain` line-oriented, taking the whole remainder of the line as
    the value.** Splitting on whitespace breaks every path containing a space.
 7. **External commands are invoked through bash arrays**, never by interpolating branch names or
@@ -224,7 +226,7 @@ Conventions:
 
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
 (issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — `--version` by another
-one (issue #6), `--done --force` by issue #23, `--list` by issue #25 and `--here` by issue #34. Still
+one (issue #6), `--done --force` by issue #23, `--list` by issue #25, `--here` by issue #34 and `--fork` by issue #36. Still
 not implemented, and not to be added without a further explicit decision:
 `--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--rebuild`, `--rescue`; pull requests
 and GitHub integration; branch deletion;
@@ -331,6 +333,33 @@ else.
 `tests/spike/sandbox-workbench.bats` is the only check of the sbx side: git working over the main
 checkout as the sole workspace, a host branch switch reaching the sandbox without a recreate, and
 edits and commits crossing in both directions. It skips without a real sbx.
+
+## How `--fork` works
+
+`task-agent <branch> --fork` (issue #36, [ADR 0006](docs/adr/0006-main-checkout-is-never-a-task-worktree.md))
+is `session_start "<branch>-fork" "<branch>"` behind a few checks in `session_fork`. A **fork** is an
+ordinary task: `naming_fork_branch` derives its name, and everything else — worktree path, sandbox
+name, teardown — follows from that name with no second scheme.
+
+Four things about it are load-bearing.
+
+1. **It exists because the main checkout is never a task's worktree.** `session_start` refuses a
+   branch that `worktree_find_for_branch` reports at the main checkout (`worktree_is_main_checkout`),
+   and names `--here` and `--fork` as the ways out. `worktree_find_for_branch` itself stays a plain
+   lookup; the refusal lives in `lib/session.sh`.
+2. **The forked branch must exist; it is never created.** Locally or as `origin/<branch>`, checked in
+   `session_fork` before anything else. Falling through to `git_resolve_base` would create nothing
+   either, but its error talks about `--base`, which `--fork` rejects.
+3. **Nothing is synced, carried or recorded.** An existing fork is reused untouched (rule 4) with an
+   info line saying so. Uncommitted changes in the main checkout are reported when the forked branch
+   is the one checked out there, and never stashed, copied or committed. No record links the fork to
+   its branch (rule 1).
+4. **`--done` on the main checkout's branch removes at most a legacy sandbox.** A task-agent from
+   before #36 could have created a task sandbox for that branch. `session_done` still rescues and
+   removes it, never touches the checkout, and refuses `--force` there before removing anything.
+   `--done <branch> --fork` is `--done <branch>-fork`, resolved in `bin/task-agent`.
+
+`--fork` combines with a branch name, `--done` and (with `--done`) `--force`, and with nothing else.
 
 ## How the agent's transcripts get out of a sandbox
 

@@ -49,7 +49,8 @@ usage() {
 Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
-  task-agent --done <branch> [--force]
+  task-agent <branch> --fork
+  task-agent --done <branch> [--fork] [--force]
   task-agent --here
   task-agent --done --here
   task-agent --list [--all]
@@ -88,6 +89,11 @@ Commands:
 Options:
   --base        Base branch for a newly created branch. Default: main.
                 Ignored when the branch already exists.
+  --fork        Work on <branch>-fork instead, a new branch created from the
+                tip of <branch>: a parallel task on top of it, also for the
+                branch checked out in the main checkout. An existing fork is
+                reused as it is, not synced. Uncommitted changes are not
+                part of it. With --done: tear down <branch>-fork.
   --force       Only with --done: remove the worktree even when it has
                 uncommitted or untracked changes, discarding them. Commits
                 are never at risk — the branch is kept either way.
@@ -100,7 +106,7 @@ EOF
 main() {
   local branch="" base="$AGENT_DEFAULT_BASE_BRANCH"
   local do_init=0 do_done=0 do_update=0 do_version=0 do_list=0
-  local base_seen=0 force=0 all=0 here=0
+  local base_seen=0 force=0 all=0 here=0 fork=0
 
   if (($# == 0)); then
     usage >&2
@@ -165,6 +171,10 @@ main() {
         here=1
         shift
         ;;
+      --fork)
+        fork=1
+        shift
+        ;;
       --)
         shift
         ;;
@@ -199,6 +209,37 @@ main() {
     error "--all is only valid with --list."
     usage >&2
     exit 1
+  fi
+
+  # --fork derives the branch name from the one given (issue #36), so it needs
+  # a branch and combines with --done (and --force) only. --base is rejected
+  # because the base of a fork *is* the branch.
+  if ((fork)); then
+    local fork_conflict=""
+    ((do_init)) && fork_conflict="--init"
+    ((do_list)) && fork_conflict="--list"
+    ((do_update)) && fork_conflict="--update"
+    ((do_version)) && fork_conflict="--version"
+    if [[ -n "$fork_conflict" ]]; then
+      error "--fork is not valid with $fork_conflict."
+      usage >&2
+      exit 1
+    fi
+    if ((here)); then
+      error "--fork is not valid with --here."
+      usage >&2
+      exit 1
+    fi
+    if ((base_seen)); then
+      error "--fork is not valid with --base: the base of a fork is the branch itself."
+      usage >&2
+      exit 1
+    fi
+    if [[ -z "$branch" ]]; then
+      error "--fork needs a branch name."
+      usage >&2
+      exit 1
+    fi
   fi
 
   # --here stands in for the branch name, so it combines with --done and with
@@ -329,6 +370,7 @@ main() {
     # worktree_remove reads says what it means at every hop.
     local force_arg=""
     ((force)) && force_arg="force"
+    ((fork)) && branch="$(naming_fork_branch "$branch")"
     session_done "$branch" "$force_arg"
     return
   fi
@@ -343,6 +385,11 @@ main() {
     error "No branch name given."
     usage >&2
     exit 1
+  fi
+
+  if ((fork)); then
+    session_fork "$branch"
+    return
   fi
 
   session_start "$branch" "$base"

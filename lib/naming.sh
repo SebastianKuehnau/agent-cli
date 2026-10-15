@@ -149,3 +149,13 @@ naming_workbench_name() {
   printf 'agent-%s-workbench' \
     "$(naming_slug "$1" "$AGENT_SANDBOX_PROJECT_MAX_LENGTH")"
 }
+
+# naming_fork_branch <branch>
+#
+# The branch a fork of <branch> works on: `<branch>-fork` (issue #36). A fork is
+# an ordinary task identified by that name, so its worktree path and sandbox
+# name follow from the usual `<slug>-<hash>` derivation — there is no second
+# naming scheme, and nothing links the fork back to <branch>.
+naming_fork_branch() {
+  printf '%s-fork' "$1"
+}

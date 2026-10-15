@@ -59,8 +59,9 @@ the caller is standing in.
 - **The name cannot collide with a task's.** A task's sandbox name always ends in a hex hash, and
   `workbench` is not hex. It does carry the project prefix, so `--list` must recognise it before its
   orphan pass, or it would be reported as a sandbox with no worktree.
-- **A task and the workbench can still share a directory**, when the main checkout has a task's
-  branch checked out — `task-agent <branch>` then reuses the main checkout as that task's worktree,
-  as it already did before this decision. Left for a separate issue.
+- **A task and the workbench could still share a directory**, when the main checkout had a task's
+  branch checked out — `task-agent <branch>` then reused the main checkout as that task's worktree.
+  Resolved by [ADR 0006](0006-main-checkout-is-never-a-task-worktree.md): that is now refused, and
+  `task-agent <branch> --fork` runs a parallel task on top of the branch instead.
 - **Architectural rule 1 is untouched.** The workbench is rediscovered by name from `sbx ls -q` like
   any task's sandbox; nothing records that it exists.

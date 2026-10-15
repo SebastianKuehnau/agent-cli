@@ -689,3 +689,140 @@ arg:run"
   [[ "$stderr" == *"Reusing sandbox"* ]] || fail "sandbox not reused: $stderr"
   assert_equal "$(grep -c '^arg:create$' "$FAKE_SBX_DIR/calls.log")" "0"
 }
+
+# --- the main checkout is never a task's worktree (issue #36) ---------------
+
+@test "a branch checked out in the main checkout is refused, nothing created" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/here
+  task feature/here
+  assert_failure
+  [[ "$stderr" == *"checked out in the main checkout"* ]] || fail "unexpected stderr: $stderr"
+  [[ "$stderr" == *"task-agent --here"* ]] || fail "--here not offered: $stderr"
+  [[ "$stderr" == *"task-agent feature/here --fork"* ]] || fail "--fork not offered: $stderr"
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "0"
+  [[ ! -d "$TMP/my-app-worktrees" ]] || fail "a worktree directory was created"
+}
+
+@test "task-agent main is refused while main is checked out" {
+  task main
+  assert_failure
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "0"
+}
+
+# --- --fork -----------------------------------------------------------------
+
+@test "a fork is created at the tip of its branch, not of main" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/base
+  add_commit "$REPO" base.txt "on feature/base"
+  local tip
+  tip="$(git -C "$REPO" rev-parse feature/base)"
+
+  task feature/base --fork
+  assert_success
+
+  assert_equal "$(git -C "$REPO" rev-parse feature/base-fork)" "$tip"
+  [[ -d "$(expected_worktree feature/base-fork)" ]] || fail "fork worktree missing"
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_output_contains "$(expected_sandbox feature/base-fork)"
+}
+
+@test "a fork works for a branch that is not checked out anywhere" {
+  git_quiet -C "$REPO" branch feature/elsewhere
+  task feature/elsewhere --fork
+  assert_success
+  assert_equal "$(git -C "$REPO" rev-parse feature/elsewhere-fork)" \
+    "$(git -C "$REPO" rev-parse feature/elsewhere)"
+}
+
+@test "an existing fork is reused untouched after its branch moved on" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/base
+  task feature/base --fork
+  assert_success
+  local fork_tip
+  fork_tip="$(git -C "$REPO" rev-parse feature/base-fork)"
+
+  add_commit "$REPO" later.txt "after the fork"
+  task feature/base --fork
+  assert_success
+
+  assert_equal "$(git -C "$REPO" rev-parse feature/base-fork)" "$fork_tip"
+  [[ "$stderr" == *"not synced"* ]] || fail "reuse not reported: $stderr"
+}
+
+@test "a fork of a branch that exists only on origin works" {
+  make_bare_origin "$REPO" "$TMP/origin.git" >/dev/null
+  git_quiet -C "$REPO" checkout --quiet -b feature/remote
+  add_commit "$REPO" remote.txt "remote only"
+  git_quiet -C "$REPO" push --quiet origin feature/remote
+  git_quiet -C "$REPO" checkout --quiet main
+  git_quiet -C "$REPO" branch --quiet -D feature/remote
+  git_quiet -C "$REPO" fetch --quiet origin
+
+  task feature/remote --fork
+  assert_success
+  assert_equal "$(git -C "$REPO" rev-parse feature/remote-fork)" \
+    "$(git -C "$REPO" rev-parse origin/feature/remote)"
+  # The forked branch itself is not created as a side effect.
+  run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/remote
+  assert_failure
+}
+
+@test "a fork of a missing branch fails and creates nothing" {
+  task feature/missing --fork
+  assert_failure
+  [[ "$stderr" == *"nothing to fork"* ]] || fail "unexpected stderr: $stderr"
+  run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/missing
+  assert_failure
+  run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/missing-fork
+  assert_failure
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "0"
+}
+
+@test "uncommitted changes in the main checkout are reported, not carried" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/base
+  printf 'dirty\n' >"$REPO/dirty.txt"
+
+  task feature/base --fork
+  assert_success
+  [[ "$stderr" == *"not part of the fork"* ]] || fail "no uncommitted-changes note: $stderr"
+  assert_file_not_exists "$(expected_worktree feature/base-fork)/dirty.txt"
+  run git -c core.excludesFile=/dev/null -C "$REPO" status --porcelain
+  assert_output_contains "dirty.txt"
+}
+
+@test "a clean main checkout gets no uncommitted-changes note" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/base
+  # The kit is untracked; commit it so the checkout is genuinely clean.
+  git_quiet -C "$REPO" add .sbx
+  git_quiet -C "$REPO" commit --quiet -m kit
+  run git -c core.excludesFile=/dev/null -C "$REPO" status --porcelain
+  assert_equal "$output" ""
+
+  task feature/base --fork
+  assert_success
+  [[ "$stderr" != *"not part of the fork"* ]] || fail "note on a clean checkout: $stderr"
+}
+
+@test "a fork of a branch not in the main checkout gets no uncommitted-changes note" {
+  git_quiet -C "$REPO" branch feature/elsewhere
+  printf 'dirty\n' >"$REPO/dirty.txt"
+  task feature/elsewhere --fork
+  assert_success
+  [[ "$stderr" != *"not part of the fork"* ]] || fail "note for another branch: $stderr"
+}
+
+@test "the workbench and a fork run side by side on different paths" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/base
+  task --here
+  assert_success
+  task feature/base --fork
+  assert_success
+
+  task --list
+  assert_success
+  local wb fork
+  wb="$(grep -F '(workbench)' <<<"$output")"
+  fork="$(grep -F 'feature/base-fork' <<<"$output")"
+  [[ "$wb" == *"  $REPO" ]] || fail "unexpected workbench row: $wb"
+  [[ "$fork" == *"  $(expected_worktree feature/base-fork)" ]] || fail "unexpected fork row: $fork"
+}
