@@ -11,7 +11,8 @@ original scaffold and is not used by the build or the tests.
 `--done` and `--update` were added on top of Phase 1 by explicit decision (issues #3 and #4), and
 `--version` by a further one (issue #6, which needed a version to compare), which is why none of them
 are in the Phase 1 exclusion list under "Scope discipline" below. `--done --force` joined them by
-issue #23, and `--list` by issue #25. Everything else in that list still applies.
+issue #23, `--list` by issue #25, and `--here` / `--done --here` by issue #34. Everything else in
+that list still applies.
 
 Issue #18 added the transcript rescue. It adds no flag and no argument: it is a step inside the two
 teardown paths that already existed. A standalone `--rescue` was considered and deliberately left out
@@ -60,7 +61,8 @@ lib/listing.sh       `--list`: the read-only view of what exists, related from `
                      and `sbx ls -q` alone
 lib/projectconfig.sh carrying the project's own .claude/ into a task's worktree, and taking the
                      copies back out before the worktree is removed
-lib/session.sh       orchestration of `task-agent <branch>` and `task-agent --done <branch>`
+lib/session.sh       orchestration of `task-agent <branch>`, `task-agent --done <branch>`, and the
+                     workbench's `--here` and `--done --here`
 lib/selfupdate.sh    `--update` only: version probe, then install the latest release in place
 scripts/build-bundle.sh  dev-time only: concatenates bin/ + lib/ into the single-file release
                          artifact `.github/workflows/publish.yml` publishes; not runtime code
@@ -220,8 +222,8 @@ Conventions:
 
 Phase 1 is intentionally small. `--done` and `--update` were added on top of it by explicit decision
 (issues #3 and #4) — see [`--done`](#how---done-tears-down-a-task) below — `--version` by another
-one (issue #6), `--done --force` by issue #23 and `--list` by issue #25. Still not implemented, and
-not to be added without a further explicit decision:
+one (issue #6), `--done --force` by issue #23, `--list` by issue #25 and `--here` by issue #34. Still
+not implemented, and not to be added without a further explicit decision:
 `--submit`, `--sync`, `--status`, `--shell`, `--plan`, `--rebuild`, `--rescue`; pull requests
 and GitHub integration; branch deletion;
 test or build execution; task specs and the `task-spec` skill; skill installation; Dev Containers; raw
@@ -293,6 +295,41 @@ Five things about it are load-bearing.
 `scripts/build-bundle.sh` names each lib file explicitly, so a new module must be added there too;
 `tests/integration/bundle.bats` compares that list against `lib/` and fails when they diverge.
 
+## How `--here` and the workbench work
+
+The **workbench** (issue #34, [ADR 0005](docs/adr/0005-workbench-sandbox-on-the-main-checkout.md)) is
+one sandbox per project, `agent-<project>-workbench`, whose only workspace is the main checkout. It
+exists so the agent can work on the files the developer's IDE has open, on whatever branch is checked
+out there, without leaving the sandbox. It is **not a task**: it owns no branch and no worktree.
+
+Five things about it are load-bearing.
+
+1. **`--here` means "the checkout I am standing in".** `session_here` compares `git_checkout_root`
+   with `git_main_repo_root`. Equal: the workbench. A linked worktree: that worktree's task, via
+   `session_start` — never a second sandbox on the same directory. Detached: an error. Both roots
+   are physical, which is what makes the comparison valid (architectural rule 10).
+2. **One workspace, no seeding.** The main checkout's `.git` is inside it, so the git-metadata
+   workspace a task needs does not apply, and `projectconfig_seed` does not run — `.claude/` is
+   already there. `session_sync_kit` therefore takes the workspaces to recreate with as arguments
+   rather than deriving a task's two.
+3. **The name has no hash and cannot collide.** `naming_workbench_name` ends in `workbench`, which is
+   not hex; every task name ends in a hex hash. Do not add a branch or a hash to it: the workbench is
+   branch-independent by decision, and the branch under it changes whenever the developer switches.
+4. **`--done --here` never touches the checkout, and is refused inside a task's worktree.** There is
+   no worktree to remove and no branch to keep. In a task's worktree, reading it as
+   `--done <branch>` would delete the directory the caller's shell and IDE are standing in.
+5. **`--list` adds it before the orphan pass.** Its name carries the `agent-<project>-` prefix, so
+   without that it would be listed as a sandbox with no worktree. Its branch column says
+   `(workbench)`, never the checked-out branch, which can change at any moment.
+
+Kit changes, the transcript rescue and `TASK_AGENT_KIT_RECREATE` behave exactly as for a task; only
+the rebuild hint differs (`task-agent --done --here`). `--here` combines with `--done` and nothing
+else.
+
+`tests/spike/sandbox-workbench.bats` is the only check of the sbx side: git working over the main
+checkout as the sole workspace, a host branch switch reaching the sandbox without a recreate, and
+edits and commits crossing in both directions. It skips without a real sbx.
+
 ## How the agent's transcripts get out of a sandbox
 
 Every sandbox has its own `~/.claude`, so an agent's session transcripts
@@ -302,7 +339,8 @@ by scanning the **host's** `$CLAUDE_CONFIG_DIR/projects`, so without help every 
 `--done` deletes.
 
 `lib/transcripts.sh` has one entry point, `transcripts_rescue <sandbox>`, called immediately **before**
-`sandbox_remove` at both places that destroy a sandbox: `session_done` and `session_sync_kit`.
+`sandbox_remove` at every place that destroys a sandbox: `session_done`, `session_workbench_done` and
+`session_sync_kit`.
 
 - `sbx exec` runs `find -mindepth 2 -maxdepth 2 -name '*.jsonl'` over
   `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`. Depth 2 matches `projects/<slug>/<session>.jsonl` and

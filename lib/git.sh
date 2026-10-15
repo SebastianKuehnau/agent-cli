@@ -51,6 +51,21 @@ git_main_repo_root() {
   fi
 }
 
+# git_checkout_root
+#
+# Physical path of the checkout the caller is standing in: the main checkout
+# or a linked worktree, from any subdirectory of either. Canonicalised with
+# `cd -P` (architectural rule 10) so it compares equal to the paths git reports
+# for git_main_repo_root and `git worktree list`.
+git_checkout_root() {
+  local top
+  if ! top="$(git rev-parse --show-toplevel 2>/dev/null)" || [[ -z "$top" ]]; then
+    die "Could not resolve the root of the current checkout." \
+      "--here needs a checkout; a bare repository has none."
+  fi
+  (cd -P "$top" && pwd)
+}
+
 # git_git_metadata_dir <main-repo-root>
 #
 # The directory that a linked worktree's `.git` file ultimately points into.

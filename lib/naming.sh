@@ -136,3 +136,16 @@ naming_sandbox_name() {
     "$(naming_slug "$branch" "$AGENT_SANDBOX_BRANCH_MAX_LENGTH")" \
     "$(naming_short_hash "$branch")"
 }
+
+# naming_workbench_name <project-id>
+#
+# The project's one workbench sandbox (issue #34): agent-<project>-workbench.
+#
+# No branch and no hash: a workbench belongs to the main checkout, not to a
+# branch, so there is nothing to hash. It still cannot collide with a task's
+# sandbox, because every task name ends in a hex hash and `workbench` is not
+# hex — a branch literally called `workbench` becomes `…-workbench-<hash>`.
+naming_workbench_name() {
+  printf 'agent-%s-workbench' \
+    "$(naming_slug "$1" "$AGENT_SANDBOX_PROJECT_MAX_LENGTH")"
+}
