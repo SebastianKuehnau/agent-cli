@@ -112,6 +112,17 @@ in_repo() {
   assert_equal "$output" "$REPO/.git"
 }
 
+@test "checkout root fails in a bare repository" {
+  git_quiet init --bare "$TMP/bare.git"
+  in_repo "$TMP/bare.git" 'git_checkout_root'
+  assert_failure
+  assert_equal "$output" ""
+  [[ "$stderr" == *"Could not resolve the root of the current checkout."* ]] ||
+    fail "unexpected stderr: $stderr"
+  [[ "$stderr" == *"--here needs a checkout; a bare repository has none."* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
 # --- branch validation ------------------------------------------------------
 
 @test "valid branch names are accepted" {

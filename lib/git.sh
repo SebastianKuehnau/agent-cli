@@ -59,9 +59,10 @@ git_main_repo_root() {
 # for git_main_repo_root and `git worktree list`.
 git_checkout_root() {
   local top
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$top" ]] ||
+  if ! top="$(git rev-parse --show-toplevel 2>/dev/null)" || [[ -z "$top" ]]; then
     die "Could not resolve the root of the current checkout." \
       "--here needs a checkout; a bare repository has none."
+  fi
   (cd -P "$top" && pwd)
 }
 
