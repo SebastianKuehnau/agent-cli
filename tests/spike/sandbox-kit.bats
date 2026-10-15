@@ -2,25 +2,29 @@
 #
 # Spike: how does a *changed* Sandbox Kit actually reach an existing sandbox?
 #
-# This started out asserting that `sbx kit add <name> <kit-dir>` applies a
-# changed kit. Run against a real sbx, it does not — and that finding is why
-# lib/session.sh recreates the sandbox instead. The tests below pin the finding
-# down so the design cannot quietly drift back:
+# task-agent applies a changed kit by remove-then-create (lib/session.sh). The
+# reason used to be that `sbx kit add` could not express "this kit changed":
+# up to sbx v0.42.1 it *appended* to a sandbox's kit list, so re-adding the
+# project's own, same-named kit failed with
 #
-#   1. `sbx kit add` *appends* to a sandbox's kit list and recomposes it. Handing
-#      it the project's own, already-applied kit therefore fails:
+#   compose: duplicate kit name "<name>" — each kit in a composition must have
+#   a unique name
 #
-#        400 Bad Request: compose agent from augmented kits: compose: duplicate
-#        kit name "<name>" — each kit in a composition must have a unique name
+# sbx v0.48.0 changed that (issue #37). Re-adding a same-named kit now
+# succeeds, and the tests below pin down what it does instead, because that —
+# not the success alone — is what a decision to use it would rest on:
 #
-#      Since the kit's name identifies the project's kit and does not change when
-#      its contents do, this is the normal case, not an edge case. `sbx kit add`
-#      simply cannot express "this kit changed".
+#   - the kit list stays one entry: the same-named kit is replaced, not
+#     appended (read from `sbx inspect --json`, which reports a sandbox's kits
+#     as the references it was given — a path, not a digest);
+#   - the changed kit's content takes effect;
+#   - files in the container survive, in $HOME and outside it — the swap
+#     container runs from an image committed from the old one;
+#   - the workspace is still the host's bind mount.
 #
-#   2. Its own output — "Recreating sandbox ... to apply augmented kit list" —
-#      shows that applying a kit recreates the sandbox anyway. So remove-then-
-#      create is not a workaround; it is the same operation, expressed with
-#      commands whose behaviour is verified (see also sandbox-remove.bats).
+# Whether task-agent should switch to it is not decided here; see issue #37.
+# The help text still says "appended to its original kit list", and the
+# command is still EXPERIMENTAL.
 #
 # Skipped automatically when sbx is unavailable, so the normal suite stays
 # runnable everywhere. Run explicitly with:
@@ -63,7 +67,10 @@ teardown() {
   sbx rm --force "$SANDBOX" >/dev/null 2>&1 || sbx rm "$SANDBOX" >/dev/null 2>&1 || true
 }
 
-# write_kit <description>
+# write_kit <description> [value]
+#
+# <value> lands in SPIKE_VALUE inside the sandbox, which is how a test sees
+# which version of the kit a sandbox is running.
 write_kit() {
   cat >"$KIT_DIR/spec.yaml" <<EOF
 schemaVersion: "2"
@@ -71,6 +78,9 @@ kind: mixin
 name: agent-cli-spike
 displayName: agent-cli sandbox-kit spike
 description: $1
+environment:
+  variables:
+    SPIKE_VALUE: "${2:-one}"
 EOF
 }
 
@@ -83,30 +93,71 @@ create_sandbox() {
   sbx create --kit "$KIT_DIR" --name "$SANDBOX" shell "$REPO"
 }
 
-# --- the finding ------------------------------------------------------------
+# --- what `sbx kit add` does with the project's own kit (v0.48.0) ----------
 
-@test "sbx kit add cannot re-apply the kit a sandbox already has" {
-  # If this ever starts succeeding, Docker Sandboxes has gained a real in-place
-  # kit update and session_sync_kit's recreate could be reconsidered. Until
-  # then, the failure is the contract.
-  create_sandbox
-
-  run sbx kit add "$SANDBOX" "$KIT_DIR"
-  assert_failure
-
-  # Only the failure is the assertion; the wording below is sbx's and may change.
-  [[ "$output" == *"duplicate kit name"* ]] ||
-    printf 'note: failed for a different reason than the known one:\n%s\n' "$output" >&3
+# kit_entries — how many times the project kit appears in the sandbox's kit list.
+#
+# Counted as the quoted path, so the workspace (a prefix of it) never matches.
+# No JSON parser: jq is not a dependency, not even for the spikes.
+kit_entries() {
+  sbx inspect --json "$SANDBOX" | grep -cF "\"$KIT_DIR\"" || true
 }
 
-@test "a changed kit does not change that" {
-  # The kit's name stays the same when its contents change, which is exactly why
-  # `sbx kit add` is unusable here.
+@test "sbx kit add accepts the kit a sandbox already has" {
+  # Up to v0.42.1 this failed with "duplicate kit name". If it starts failing
+  # again, issue #37's premise is gone.
   create_sandbox
-  write_kit "edited after the sandbox existed"
 
   run sbx kit add "$SANDBOX" "$KIT_DIR"
-  assert_failure
+  assert_success
+}
+
+@test "re-adding a changed kit replaces it instead of appending a second copy" {
+  create_sandbox
+  assert_equal "$(kit_entries)" "1"
+
+  write_kit "edited after the sandbox existed" "two"
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+  assert_equal "$(kit_entries)" "1"
+
+  write_kit "edited a second time" "three"
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+  assert_equal "$(kit_entries)" "1"
+}
+
+@test "the changed kit's content takes effect after sbx kit add" {
+  create_sandbox
+  run sbx exec "$SANDBOX" sh -c 'printf %s "$SPIKE_VALUE"'
+  assert_equal "$output" "one"
+
+  write_kit "edited after the sandbox existed" "two"
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+
+  run sbx exec "$SANDBOX" sh -c 'printf %s "$SPIKE_VALUE"'
+  assert_success
+  assert_equal "$output" "two"
+}
+
+@test "container files survive sbx kit add, unlike remove-then-create" {
+  create_sandbox
+  sbx exec "$SANDBOX" sh -c 'echo kept > "$HOME/spike-marker"; echo kept > /tmp/spike-marker'
+
+  write_kit "edited after the sandbox existed" "two"
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+
+  run sbx exec "$SANDBOX" cat /home/agent/spike-marker /tmp/spike-marker
+  assert_success
+  assert_equal "${output//$'\r'/}" $'kept\nkept'
+}
+
+@test "the workspace is still the host's bind mount after sbx kit add" {
+  create_sandbox
+  write_kit "edited after the sandbox existed" "two"
+  sbx kit add "$SANDBOX" "$KIT_DIR"
+
+  run sbx exec "$SANDBOX" sh -c "printf 'from sandbox\\n' > '$REPO/after-kit-add.txt'"
+  assert_success
+  assert_equal "$(cat "$REPO/after-kit-add.txt")" "from sandbox"
 }
 
 # --- what task-agent actually does ------------------------------------------
