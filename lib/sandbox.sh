@@ -136,22 +136,21 @@ sandbox_attach() {
   exec "${AGENT_SBX_ARGV[@]}"
 }
 
-# There is deliberately no `sbx kit add` wrapper here. It cannot express "this
-# kit changed": by its own documentation it recreates the sandbox "with the new
-# kit appended to its original kit list", so re-adding the project's own kit
-# fails with
+# There is deliberately no `sbx kit add` wrapper here. Up to sbx v0.42.1 it
+# could not re-apply the project's own kit at all:
 #
 #   compose: duplicate kit name "<name>" — each kit in a composition must have
 #   a unique name
 #
-# which is what tests/spike/sandbox-kit.bats demonstrates against the real CLI.
-# `sbx kit` offers add, inspect, pack, pull, push and validate — there is no
-# replace or remove to reach for either.
+# From v0.48.0 it replaces a same-named kit, but runs the kit's install steps
+# again on top of the kept container, every time: an unchanged step runs twice,
+# a removed step's effects stay. A sandbox would then depend on its kit history
+# rather than on the current kit, and every install step in every kit would
+# have to be idempotent (issue #37, measured in tests/spike/sandbox-kit.bats).
 #
-# Since applying a kit recreates the sandbox regardless, a changed kit is applied
-# here by remove-then-create, using commands the spike already covers. The one
-# thing given up is that `sbx kit add`'s own swap preserves kit-owned volumes
-# (agent session state) while `sbx rm` does not — which is why the user is asked
+# So a changed kit is applied by remove-then-create, which always yields exactly
+# the current kit. What that gives up is the container state `sbx kit add`
+# would keep — including the agent's session — which is why the user is asked
 # first. See lib/session.sh's session_sync_kit.
 
 # sandbox_build_remove_argv <name>
