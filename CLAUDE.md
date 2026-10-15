@@ -84,7 +84,9 @@ These are load-bearing. Breaking one of them breaks the tool's core guarantees.
    `lib/kit.sh` at `<main-repo>/.git/agent-cli/kit/<sandbox>`. It exists because Docker Sandboxes
    offers no way to ask a sandbox which kit it currently has — re-measured on sbx v0.42.1:
    `sbx ls --json` reports `name`, `id`, `agent`, `status` and `workspaces` and no kit at all, and
-   `sbx kit inspect` takes a kit *reference*, not a sandbox. It is permitted only as a **cache**,
+   `sbx kit inspect` takes a kit *reference*, not a sandbox. `sbx inspect --json <sandbox>` (seen on v0.48.0) does
+   list a sandbox's `kits`, but as the reference it was given — a path — so a changed kit at the
+   same path is indistinguishable, and the cache is still needed. It is permitted only as a **cache**,
    and that is what bounds the exception:
 
    - It may never be consulted to decide whether a branch, a worktree or a sandbox exists.
@@ -435,6 +437,12 @@ v0.42.1: still `add`, `inspect`, `pack`, `provenance`, `pull`, `push`, `sign`, `
 no replace, no remove, and `sbx kit add --help` still says "appended to its original kit list". Note it
 also refuses sandboxes created before its recreate feature shipped, so it could never have been
 depended on unconditionally.
+
+**sbx v0.48.0 changed this (issue #37, undecided).** Re-adding the same-named kit now succeeds and
+*replaces* it: the kit list stays one entry, the changed content takes effect, and container files
+survive. `tests/spike/sandbox-kit.bats` now pins that down, and so fails on v0.42.1. The help text
+still says "appended", the command is still experimental, and the code still recreates. Whether to
+switch is the open question in #37 — do not switch without deciding it there.
 
 Three pieces, deliberately separate:
 
