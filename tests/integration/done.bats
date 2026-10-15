@@ -435,3 +435,88 @@ arg:rm"
   run cat "$FAKE_SBX_DIR/sandboxes"
   assert_output_not_contains "agent-my-app-feature-new-crud"
 }
+
+# --- the main checkout (issue #36) ------------------------------------------
+
+@test "--done for the main checkout's branch removes nothing when there is no sandbox" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/here
+  printf 'wip\n' >"$REPO/wip.txt"
+
+  task --done feature/here
+  assert_success
+  [[ "$stderr" == *"main checkout"* ]] || fail "main checkout not named: $stderr"
+  assert_equal "$(fake_sbx_subcommand_call_count rm)" "0"
+  assert_file_exists "$REPO/wip.txt"
+  run git -C "$REPO" branch --show-current
+  assert_equal "$output" "feature/here"
+}
+
+@test "--done removes a legacy task sandbox on the main checkout, never the checkout" {
+  # A task-agent from before issue #36 could put a task on the main checkout.
+  git_quiet -C "$REPO" checkout --quiet -b feature/here
+  fake_sbx_add_sandbox "$(expected_sandbox feature/here)"
+  printf 'wip\n' >"$REPO/wip.txt"
+
+  task --done feature/here
+  assert_success
+  [[ "$stderr" == *"--done --here"* ]] || fail "workbench hint missing: $stderr"
+
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_equal "$output" ""
+  # Rescued before removal.
+  run sbx_subcommands
+  [[ "$output" == *"arg:exec"*"arg:rm"* ]] || fail "not rescued before removal: $output"
+  assert_file_exists "$REPO/wip.txt"
+  run git -C "$REPO" branch --show-current
+  assert_equal "$output" "feature/here"
+}
+
+@test "--done --force for the main checkout's branch is refused before removing anything" {
+  git_quiet -C "$REPO" checkout --quiet -b feature/here
+  fake_sbx_add_sandbox "$(expected_sandbox feature/here)"
+
+  task --done feature/here --force
+  assert_failure
+  [[ "$stderr" == *"main checkout"* ]] || fail "unexpected stderr: $stderr"
+  assert_equal "$(fake_sbx_subcommand_call_count rm)" "0"
+}
+
+# --- --done --fork -----------------------------------------------------------
+
+@test "--done <branch> --fork removes the fork's worktree and sandbox, keeps the branches" {
+  git_quiet -C "$REPO" branch feature/base
+  task feature/base --fork
+  assert_success
+  [[ -d "$(expected_worktree feature/base-fork)" ]] || fail "fork not created"
+
+  task --done feature/base --fork
+  assert_success
+
+  [[ ! -d "$(expected_worktree feature/base-fork)" ]] || fail "fork worktree left behind"
+  run cat "$FAKE_SBX_DIR/sandboxes"
+  assert_equal "$output" ""
+  run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/base-fork
+  assert_success
+  run git -C "$REPO" show-ref --verify --quiet refs/heads/feature/base
+  assert_success
+}
+
+@test "--done <branch>-fork works without --fork" {
+  git_quiet -C "$REPO" branch feature/base
+  task feature/base --fork
+  assert_success
+  task --done feature/base-fork
+  assert_success
+  [[ ! -d "$(expected_worktree feature/base-fork)" ]] || fail "fork worktree left behind"
+}
+
+@test "--done <branch> --fork --force discards the fork's uncommitted changes" {
+  git_quiet -C "$REPO" branch feature/base
+  task feature/base --fork
+  assert_success
+  printf 'scratch\n' >"$(expected_worktree feature/base-fork)/scratch.txt"
+
+  task --done feature/base --fork --force
+  assert_success
+  [[ ! -d "$(expected_worktree feature/base-fork)" ]] || fail "fork worktree left behind"
+}

@@ -175,3 +175,18 @@ setup() {
   name="$(naming_workbench_name 'My Äpp!')"
   [[ "$name" =~ ^[a-z0-9.+-]+$ ]] || fail "unexpected characters in workbench name: $name"
 }
+
+# --- naming_fork_branch -----------------------------------------------------
+
+@test "fork branch is the branch with -fork appended" {
+  assert_equal "$(naming_fork_branch 'main')" "main-fork"
+}
+
+@test "fork branch keeps a slash in the branch name" {
+  assert_equal "$(naming_fork_branch 'feature/x')" "feature/x-fork"
+}
+
+@test "a fork gets its own sandbox name, distinct from its branch's" {
+  assert_not_equal "$(naming_sandbox_name 'my-app' "$(naming_fork_branch 'feature/x')")" \
+    "$(naming_sandbox_name 'my-app' 'feature/x')"
+}
