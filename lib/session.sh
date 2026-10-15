@@ -96,13 +96,13 @@ session_start() {
 # one (issue #7). Before this, editing .sbx/kit had no effect until the sandbox
 # was recreated by hand.
 #
-# Applying a kit means **recreating** the sandbox. There is no in-place update:
-# `sbx kit add` only appends to a sandbox's kit list, so handing it the project's
-# own kit again fails with "duplicate kit name", and its output shows it recreates
-# the sandbox anyway. tests/spike/sandbox-kit.bats pins both facts down against
-# the real CLI. So the kit is applied here with remove-then-create, which the
-# spike already covers, instead of an experimental command that cannot express
-# what is needed.
+# Applying a kit means **recreating** the sandbox, by remove-then-create. Up to
+# sbx v0.42.1 `sbx kit add` could not do it at all ("duplicate kit name"). From
+# v0.48.0 it can replace a same-named kit, but it reruns the kit's install steps
+# on top of the kept container, so the result depends on the sandbox's kit
+# history rather than on the current kit (issue #37). Remove-then-create always
+# yields exactly the current kit. tests/spike/sandbox-kit.bats pins both
+# behaviours down against the real CLI.
 #
 # Because that is destructive to anything living only inside the container, it is
 # not silent: see session_kit_should_recreate.
@@ -175,8 +175,8 @@ session_kit_should_recreate() {
   esac
 
   warning "The Sandbox Kit changed since sandbox '$sandbox' was created."
-  warning "Applying it recreates that sandbox — Docker Sandboxes has no in-place"
-  warning "kit update — so anything that exists only inside the container is lost."
+  warning "Applying it recreates that sandbox from scratch, so anything that exists"
+  warning "only inside the container is lost."
   warning "The agent's transcripts are copied to the host first, so they still"
   warning "reach /insights, but the session itself cannot be resumed afterwards."
   warning "The checkout on the host, its files and its commits are not affected."

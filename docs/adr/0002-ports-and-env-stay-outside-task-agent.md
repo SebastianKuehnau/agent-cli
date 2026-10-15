@@ -72,3 +72,20 @@ The decision is unchanged, and the list of options it would have to forward got 
   by itself now. The by-hand step this ADR documents therefore got more reliable, not less.
 - The kit schema still has no `ports` field, and kit `environment.variables` still does not
   interpolate, so the two measurements that produced this decision stand.
+
+## Re-measured on sbx v0.48.0 (2026-10-15)
+
+The decision is unchanged. The licence case now has a by-hand route that needs no passthrough
+([#31](https://github.com/SebastianKuehnau/agent-cli/issues/31)):
+
+- **`sbx mount <sandbox> HOST:CTR_TARGET:ro`** bind-mounts a host file into a *running* sandbox at a
+  chosen path. Measured with a dummy key: `~/.vaadin/offlineKey:/home/agent/.vaadin/offlineKey:ro`
+  lands where Vaadin looks for it, is read-only for the agent, reflects a rewrite on the host, and
+  survives stop/start. It does not survive the sandbox being recreated. A real Vaadin build accepting
+  a real key was not measured.
+- Kit `environment.variables` still does not interpolate (`${VAR}` arrives literally), and
+  `sbx secret set-custom` still delivers a placeholder, so the original two measurements stand.
+
+`task-agent` does **not** run that mount itself. It is not an option passthrough, but it would be the
+first Vaadin-specific behaviour in a tool that is otherwise project-agnostic — the same boundary as
+ADR 0003. It is documented in `README.md` as a step the user takes once per sandbox.

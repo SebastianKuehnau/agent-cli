@@ -232,7 +232,8 @@ by recreating it, which `task-agent <branch>` offers to do.
 #### Vaadin licence in the sandbox
 
 Vaadin Pro components and TestBench need a licence, and **`task-agent` does not deliver one**. This
-section records what was measured against `sbx` v0.39.0 so you do not have to rediscover it.
+section records what was measured against `sbx` v0.39.0, and again against v0.48.0, so you do not
+have to rediscover it.
 
 The two Vaadin licence kinds behave differently, and that decides everything:
 
@@ -255,10 +256,32 @@ Three things that do **not** work, each verified:
   the literal string `${VAADIN_OFFLINE_KEY}`. Putting the real value in the kit means committing it.
 - **`sbx setup`** imports secrets only for the built-in agent services, not arbitrary ones.
 
-So today the options are to run the sandbox's build without commercial features, or to publish the key
-into the sandbox yourself with `sbx create --env` outside `task-agent`. Adding a `--env` passthrough to
-`task-agent` is a deliberate non-decision — see
-[ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).
+What **does** work, since `sbx mount` (measured on v0.48.0): mount your offline key file read-only
+into the running sandbox, at the path Vaadin looks for it.
+
+```bash
+task-agent --list                             # find the sandbox name
+sbx mount agent-my-app-feature-x-a1b2c3 \
+  ~/.vaadin/offlineKey:/home/agent/.vaadin/offlineKey:ro
+```
+
+- The key is **not copied** into the sandbox or into any file you could commit. It is a bind mount of
+  the file on your host, and `:ro` keeps the agent from changing it.
+- It **survives** stopping and starting the sandbox, so `task-agent <branch>` and `task-agent --here`
+  re-attach with the key still there.
+- It does **not survive** the sandbox being recreated: after `--done` or a kit rebuild, mount it
+  again.
+- Mount the **file**, not the whole `~/.vaadin` directory, which would expose everything in it, and
+  read-write by default.
+- `~/.vaadin` inside the sandbox then belongs to `root`, so nothing else can be written there.
+- A single-file mount follows the file, not its name: if something *replaces* `offlineKey` on your
+  host instead of rewriting it, the sandbox keeps seeing the old one until you mount it again.
+
+Only the mount was measured, with a dummy file — not a real Vaadin build accepting a real key.
+
+The other option is to publish the key yourself with `sbx create --env`, outside `task-agent`. Adding
+a `--env` passthrough to `task-agent`, or a Vaadin-specific mount step, is a deliberate non-decision —
+see [ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).
 
 #### Ports
 
@@ -293,17 +316,20 @@ Unchanged kit:    nothing happens.
 The comparison covers the whole `.sbx/kit` directory — not just `spec.yaml` — so editing, adding,
 removing or renaming any file in it counts as a change. Moving your checkout somewhere else does not.
 
-**Applying a kit means recreating the sandbox.** Docker Sandboxes has no in-place kit update: `sbx kit
-add` only *appends* a kit to a sandbox, and recreates the sandbox to do even that. So `task-agent`
-asks first, and tells you what is at stake:
+**Applying a kit means recreating the sandbox.** `task-agent` removes the sandbox and creates it again
+from the current kit. It does not use `sbx kit add`. Since sbx v0.48.0 that command can replace a kit
+in place and keep the container, but it reruns the kit's install steps on top of whatever the
+container already holds, so the result depends on the sandbox's history rather than on the kit
+([#37](https://github.com/SebastianKuehnau/agent-cli/issues/37)). Recreating loses whatever exists
+only inside the container, so `task-agent` asks first, and tells you what is at stake:
 
 ```text
 [task-agent] warning: The Sandbox Kit changed since sandbox 'agent-my-app-…' was created.
-[task-agent] warning: Applying it recreates that sandbox — Docker Sandboxes has no in-place
-[task-agent] warning: kit update — so anything that exists only inside the container is lost.
+[task-agent] warning: Applying it recreates that sandbox from scratch, so anything that exists
+[task-agent] warning: only inside the container is lost.
 [task-agent] warning: The agent's transcripts are copied to the host first, so they still
 [task-agent] warning: reach /insights, but the session itself cannot be resumed afterwards.
-[task-agent] warning: The worktree on the host, its files and its commits are not affected.
+[task-agent] warning: The checkout on the host, its files and its commits are not affected.
 [task-agent] Recreate 'agent-my-app-…' from the current kit? [y/N]
 ```
 
