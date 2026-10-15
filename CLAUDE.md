@@ -326,6 +326,10 @@ Kit changes, the transcript rescue and `TASK_AGENT_KIT_RECREATE` behave exactly 
 the rebuild hint differs (`task-agent --done --here`). `--here` combines with `--done` and nothing
 else.
 
+`tests/spike/sandbox-workbench.bats` is the only check of the sbx side: git working over the main
+checkout as the sole workspace, a host branch switch reaching the sandbox without a recreate, and
+edits and commits crossing in both directions. It skips without a real sbx.
+
 ## How the agent's transcripts get out of a sandbox
 
 Every sandbox has its own `~/.claude`, so an agent's session transcripts
