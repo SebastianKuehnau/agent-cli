@@ -156,3 +156,22 @@ setup() {
     'feature/a-very-long-branch-name-that-exceeds-the-cap')"
   [[ "${name##*-}" =~ ^[0-9a-f]{6}$ ]] || fail "hash truncated or missing: $name"
 }
+
+# --- naming_workbench_name --------------------------------------------------
+
+@test "workbench name is the agent prefix, the project and 'workbench'" {
+  assert_equal "$(naming_workbench_name 'my-app')" "agent-my-app-workbench"
+}
+
+@test "workbench name can never be a task's sandbox name" {
+  # A task's name always ends in a hex hash; 'workbench' is not hex. Even a
+  # branch literally called 'workbench' gets a hash appended.
+  assert_not_equal "$(naming_workbench_name 'my-app')" \
+    "$(naming_sandbox_name 'my-app' 'workbench')"
+}
+
+@test "workbench name uses only characters sbx accepts" {
+  local name
+  name="$(naming_workbench_name 'My Äpp!')"
+  [[ "$name" =~ ^[a-z0-9.+-]+$ ]] || fail "unexpected characters in workbench name: $name"
+}

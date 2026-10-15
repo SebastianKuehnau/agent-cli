@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Orchestration for `task-agent <branch> [--base <branch>]` and
-# `task-agent --done <branch>`.
+# Orchestration for `task-agent <branch> [--base <branch>]`,
+# `task-agent --done <branch>`, and their workbench counterparts `--here` and
+# `--done --here`.
 #
 # This module only sequences the other modules; it contains no git plumbing, no
 # path derivation and no sbx argument construction of its own.
@@ -72,7 +73,9 @@ session_start() {
 
   if sandbox_exists "$sandbox"; then
     info "Reusing sandbox '$sandbox'"
-    session_sync_kit "$main_root" "$sandbox" "$kit_dir" "$kit_hash" "$worktree"
+    session_sync_kit "$main_root" "$sandbox" "$kit_dir" "$kit_hash" \
+      "task-agent --done <branch>" \
+      "$worktree" "$(git_git_metadata_dir "$main_root")"
   else
     info "Creating sandbox '$sandbox'"
     sandbox_create \
@@ -87,7 +90,7 @@ session_start() {
   sandbox_attach "$sandbox"
 }
 
-# session_sync_kit <main-root> <sandbox> <kit-dir> <kit-hash> <worktree>
+# session_sync_kit <main-root> <sandbox> <kit-dir> <kit-hash> <rebuild-hint> <workspace...>
 #
 # Bring an existing sandbox's Sandbox Kit up to date with the project's current
 # one (issue #7). Before this, editing .sbx/kit had no effect until the sandbox
@@ -103,8 +106,14 @@ session_start() {
 #
 # Because that is destructive to anything living only inside the container, it is
 # not silent: see session_kit_should_recreate.
+#
+# <workspace...> are exactly what the sandbox was created with, since the
+# recreate has to reproduce them: a task's worktree plus the git metadata dir,
+# or the main checkout alone for the workbench. <rebuild-hint> is the command
+# that tears this sandbox down, quoted to the user when a change is skipped.
 session_sync_kit() {
-  local main_root="$1" sandbox="$2" kit_dir="$3" kit_hash="$4" worktree="$5"
+  local main_root="$1" sandbox="$2" kit_dir="$3" kit_hash="$4" hint="$5"
+  shift 5
 
   # No digest means no comparison is possible; leave the sandbox alone rather
   # than rebuilding it on every single start.
@@ -128,7 +137,7 @@ session_sync_kit() {
     return 0
   fi
 
-  session_kit_should_recreate "$sandbox" || return 0
+  session_kit_should_recreate "$sandbox" "$hint" || return 0
 
   info "Recreating sandbox '$sandbox' from the current Sandbox Kit"
   # The transcripts live only inside the container, so they have to come out
@@ -136,29 +145,26 @@ session_sync_kit() {
   # recreate — see lib/transcripts.sh.
   transcripts_rescue "$sandbox" || true
   sandbox_remove "$sandbox"
-  sandbox_create \
-    "$sandbox" \
-    "$kit_dir" \
-    "$worktree" \
-    "$(git_git_metadata_dir "$main_root")"
+  sandbox_create "$sandbox" "$kit_dir" "$@"
 
   kit_cache_write "$main_root" "$sandbox" "$kit_hash" || true
   success "Recreated '$sandbox' from the current Sandbox Kit"
 }
 
-# session_kit_should_recreate <sandbox> — 0 to recreate, non-zero to leave it be.
+# session_kit_should_recreate <sandbox> <rebuild-hint> — 0 to recreate, non-zero
+# to leave it be.
 #
 # Honours TASK_AGENT_KIT_RECREATE (ask | yes | no). In `ask` mode with no
 # terminal to ask at, the answer is no: recreating a sandbox unasked would throw
 # away container state the user may still want, and skipping it only leaves the
 # sandbox as it already was.
 session_kit_should_recreate() {
-  local sandbox="$1"
+  local sandbox="$1" hint="$2"
 
   case "$TASK_AGENT_KIT_RECREATE" in
     yes) return 0 ;;
     no)
-      session_kit_kept "$sandbox" "TASK_AGENT_KIT_RECREATE=no."
+      session_kit_kept "$sandbox" "TASK_AGENT_KIT_RECREATE=no." "$hint"
       return 1
       ;;
     ask) ;;
@@ -173,10 +179,10 @@ session_kit_should_recreate() {
   warning "kit update — so anything that exists only inside the container is lost."
   warning "The agent's transcripts are copied to the host first, so they still"
   warning "reach /insights, but the session itself cannot be resumed afterwards."
-  warning "The worktree on the host, its files and its commits are not affected."
+  warning "The checkout on the host, its files and its commits are not affected."
 
   if [[ ! -t 0 ]]; then
-    session_kit_kept "$sandbox" "Not asking, because stdin is not a terminal."
+    session_kit_kept "$sandbox" "Not asking, because stdin is not a terminal." "$hint"
     warning "  Set TASK_AGENT_KIT_RECREATE=yes to recreate without being asked."
     return 1
   fi
@@ -185,11 +191,11 @@ session_kit_should_recreate() {
     return 0
   fi
 
-  session_kit_kept "$sandbox" "Not recreating it."
+  session_kit_kept "$sandbox" "Not recreating it." "$hint"
   return 1
 }
 
-# session_kit_kept <sandbox> <reason>
+# session_kit_kept <sandbox> <reason> <rebuild-hint>
 #
 # Report that a changed kit was not applied. The digest is deliberately not
 # recorded, so the next run offers again rather than treating the old kit as
@@ -197,7 +203,7 @@ session_kit_should_recreate() {
 session_kit_kept() {
   warning "$2 Sandbox '$1' keeps the kit it was created with."
   warning "To apply the current kit later, rebuild the sandbox:"
-  warning "  task-agent --done <branch>   # then start the task again"
+  warning "  $3   # then start it again"
 }
 
 # session_done <branch> [force]
@@ -268,4 +274,130 @@ session_done() {
   fi
 
   success "Branch '$branch' was kept."
+}
+
+# session_here <base>
+#
+# `task-agent --here`: the agent for the checkout the caller is standing in
+# (issue #34). In the main checkout that is the project's workbench; inside a
+# task's worktree it is that task, exactly as `task-agent <its branch>` — never
+# a second sandbox on the same directory. <base> only reaches session_start,
+# where it is ignored because the worktree's branch already exists.
+session_here() {
+  local base="$1"
+
+  git_require_git
+  git_require_repo
+  sandbox_require_cli
+
+  local main_root checkout
+  main_root="$(git_main_repo_root)" || exit 1
+  checkout="$(git_checkout_root)" || exit 1
+
+  if [[ "$checkout" != "${main_root%/}" ]]; then
+    local branch
+    branch="$(session_here_branch "$main_root" "$checkout")" || exit 1
+    info "Inside the worktree of '$branch': starting that task"
+    session_start "$branch" "$base"
+    return
+  fi
+
+  session_workbench_start "$main_root"
+}
+
+# session_here_branch <main-root> <checkout> — the branch of a linked worktree.
+#
+# Prints the bare branch name, or dies: a detached worktree has no branch, so
+# there is no task it could belong to.
+session_here_branch() {
+  local main_root="$1" checkout="$2" ref
+  ref="$(worktree_branch_at_path "$main_root" "$checkout")" ||
+    die "This checkout is not a worktree git knows about: $checkout"
+  [[ "$ref" != "detached" ]] ||
+    die "This worktree has a detached HEAD, so it belongs to no task:" \
+      "  $checkout" \
+      "Check out a branch in it, or run --here from the main checkout."
+  printf '%s' "${ref#refs/heads/}"
+}
+
+# session_workbench_start <main-root>
+#
+# Create or re-attach the workbench: one sandbox per project whose only
+# workspace is the main checkout. No branch is created and no worktree added —
+# the agent works on whatever the developer has checked out, beside their IDE.
+#
+# One workspace suffices because the main checkout's .git is inside it; the
+# second workspace a task needs exists only to resolve a linked worktree's
+# `gitdir:` pointer. The project's .claude/ is already there too, so there is
+# nothing to seed.
+session_workbench_start() {
+  local main_root="$1"
+
+  transcripts_validate_mode
+  scaffold_require_kit "$main_root"
+
+  local sandbox
+  sandbox="$(naming_workbench_name "$(naming_project_id "$main_root")")"
+  info "Workbench on the main checkout: $main_root"
+
+  local kit_dir kit_hash
+  kit_dir="$(scaffold_kit_dir "$main_root")"
+  kit_hash="$(scaffold_kit_hash "$main_root")" || kit_hash=""
+
+  if sandbox_exists "$sandbox"; then
+    info "Reusing workbench '$sandbox'"
+    session_sync_kit "$main_root" "$sandbox" "$kit_dir" "$kit_hash" \
+      "task-agent --done --here" "$main_root"
+  else
+    info "Creating workbench '$sandbox'"
+    sandbox_create "$sandbox" "$kit_dir" "$main_root"
+    [[ -n "$kit_hash" ]] && kit_cache_write "$main_root" "$sandbox" "$kit_hash"
+  fi
+
+  sandbox_attach "$sandbox"
+}
+
+# session_workbench_done
+#
+# `task-agent --done --here`: remove the workbench sandbox, rescuing its
+# transcripts first. The main checkout is never touched — there is no worktree
+# to remove and no branch that belongs to the workbench.
+#
+# Inside a task's worktree this is refused rather than read as `--done
+# <branch>`: that would delete the directory the caller's shell, and very
+# likely their IDE, is standing in.
+session_workbench_done() {
+  git_require_git
+  git_require_repo
+  sandbox_require_cli
+
+  transcripts_validate_mode
+
+  local main_root checkout
+  main_root="$(git_main_repo_root)" || exit 1
+  checkout="$(git_checkout_root)" || exit 1
+
+  if [[ "$checkout" != "${main_root%/}" ]]; then
+    local branch
+    branch="$(session_here_branch "$main_root" "$checkout")" || exit 1
+    die "--done --here removes the workbench, and this is the worktree of a task." \
+      "Removing it would delete the directory you are standing in. Instead, run" \
+      "from the main checkout ($main_root):" \
+      "  task-agent --done $branch"
+  fi
+
+  local sandbox
+  sandbox="$(naming_workbench_name "$(naming_project_id "$main_root")")"
+
+  if sandbox_exists "$sandbox"; then
+    transcripts_rescue "$sandbox" || true
+    info "Removing workbench '$sandbox'"
+    sandbox_remove "$sandbox"
+  else
+    info "No workbench found for this project"
+  fi
+
+  kit_cache_remove "$main_root" "$sandbox"
+
+  success "The main checkout was not touched."
 }

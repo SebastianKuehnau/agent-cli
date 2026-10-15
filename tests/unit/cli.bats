@@ -349,6 +349,67 @@ cli() {
   assert_file_not_exists "$TMP/my-app-worktrees"
 }
 
+# --- --here ---------------------------------------------------------------
+
+@test "help documents --here and --done --here" {
+  cli --help
+  assert_success
+  assert_output_contains "task-agent --here"
+  assert_output_contains "task-agent --done --here"
+}
+
+@test "--here is accepted and reaches the kit check" {
+  cli --here
+  assert_failure
+  [[ "$stderr" == *"No Sandbox Kit found"* ]] ||
+    fail "did not reach the kit check: $stderr"
+}
+
+@test "--here with a branch name is rejected" {
+  cli --here feature/x
+  assert_failure
+  [[ "$stderr" == *"--here does not take a branch name"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--done --here with a branch name is rejected" {
+  cli --done --here feature/x
+  assert_failure
+  [[ "$stderr" == *"--here does not take a branch name"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--here with --base is rejected" {
+  cli --here --base develop
+  assert_failure
+  [[ "$stderr" == *"--base is not valid with --here"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--here with --force is rejected" {
+  cli --here --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --here"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--done --here with --force is rejected" {
+  cli --done --here --force
+  assert_failure
+  [[ "$stderr" == *"--force is not valid with --here"* ]] ||
+    fail "unexpected stderr: $stderr"
+}
+
+@test "--here with --init, --list, --update or --version is rejected" {
+  local mode
+  for mode in --init --list --update --version; do
+    cli --here "$mode"
+    assert_failure
+    [[ "$stderr" == *"--here is only valid on its own or with --done"* ]] ||
+      fail "unexpected stderr for $mode: $stderr"
+  done
+}
+
 # --- acceptance -------------------------------------------------------------
 
 @test "a bare branch argument is accepted and reaches the kit check" {

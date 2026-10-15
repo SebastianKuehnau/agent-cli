@@ -50,6 +50,8 @@ Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
   task-agent --done <branch> [--force]
+  task-agent --here
+  task-agent --done --here
   task-agent --list [--all]
   task-agent --update
   task-agent --version
@@ -68,9 +70,16 @@ Commands:
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
+  --here        Start the agent for the checkout you are standing in. In the
+                main checkout that is the project's workbench: one sandbox
+                working directly in the main checkout, beside your IDE, on
+                whatever branch is checked out there. No branch or worktree
+                is created. Inside a task's worktree it starts that task.
+                With --done: remove the workbench sandbox. The checkout is
+                not touched. Refused inside a task's worktree.
   --list        List this project's tasks: every branch that has a worktree,
-                and the sandbox belonging to it. A '-' means that side is
-                not there.
+                and the sandbox belonging to it, plus the workbench. A '-'
+                means that side is not there.
   --update      Install the latest task-agent release, unless it is already
                 installed. Only works for a single-file install; a git
                 checkout is updated with 'git pull' instead.
@@ -91,7 +100,7 @@ EOF
 main() {
   local branch="" base="$AGENT_DEFAULT_BASE_BRANCH"
   local do_init=0 do_done=0 do_update=0 do_version=0 do_list=0
-  local base_seen=0 force=0 all=0
+  local base_seen=0 force=0 all=0 here=0
 
   if (($# == 0)); then
     usage >&2
@@ -152,6 +161,10 @@ main() {
         all=1
         shift
         ;;
+      --here)
+        here=1
+        shift
+        ;;
       --)
         shift
         ;;
@@ -186,6 +199,39 @@ main() {
     error "--all is only valid with --list."
     usage >&2
     exit 1
+  fi
+
+  # --here stands in for the branch name, so it combines with --done and with
+  # nothing else (issue #34). Checked before the per-mode blocks for the same
+  # reason --all is.
+  if ((here)); then
+    if ((do_init || do_list || do_update || do_version)); then
+      error "--here is only valid on its own or with --done."
+      usage >&2
+      exit 1
+    fi
+    if [[ -n "$branch" ]]; then
+      error "--here does not take a branch name (got: $branch)"
+      error "It uses the checkout you are standing in."
+      usage >&2
+      exit 1
+    fi
+    if ((base_seen)); then
+      error "--base is not valid with --here."
+      usage >&2
+      exit 1
+    fi
+    if ((force)); then
+      error "--force is not valid with --here."
+      usage >&2
+      exit 1
+    fi
+    if ((do_done)); then
+      session_workbench_done
+    else
+      session_here "$AGENT_DEFAULT_BASE_BRANCH"
+    fi
+    return
   fi
 
   if ((do_version)); then

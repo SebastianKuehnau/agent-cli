@@ -67,6 +67,8 @@ Usage:
   task-agent --init [<preset>]
   task-agent <branch> [--base <branch>]
   task-agent --done <branch> [--force]
+  task-agent --here
+  task-agent --done --here
   task-agent --list [--all]
   task-agent --update
   task-agent --version
@@ -85,9 +87,16 @@ Commands:
                 then start the agent inside it.
   --done        Remove the sandbox and worktree for <branch>. The branch
                 itself is kept.
+  --here        Start the agent for the checkout you are standing in. In the
+                main checkout that is the project's workbench: one sandbox
+                working directly in the main checkout, beside your IDE, on
+                whatever branch is checked out there. No branch or worktree
+                is created. Inside a task's worktree it starts that task.
+                With --done: remove the workbench sandbox. The checkout is
+                not touched. Refused inside a task's worktree.
   --list        List this project's tasks: every branch that has a worktree,
-                and the sandbox belonging to it. A '-' means that side is
-                not there.
+                and the sandbox belonging to it, plus the workbench. A '-'
+                means that side is not there.
   --update      Install the latest task-agent release, unless it is already
                 installed. Only works for a single-file install; a git
                 checkout is updated with 'git pull' instead.
@@ -349,6 +358,41 @@ There is no state file. What exists is rediscovered from `git worktree list` and
 inspect and clean up with plain `git` and `sbx` commands. The one thing written down — which Sandbox
 Kit a sandbox last got, under `.git/agent-cli/kit/` — is a cache that nothing depends on being there.
 
+### Work beside your IDE: the workbench
+
+A task runs in its own worktree, which your IDE does not show unless you open it as a second
+project. For a quick question about the code, or a change on the branch you already have checked
+out, start the **workbench** instead:
+
+```bash
+cd ~/projects/my-app
+task-agent --here
+```
+
+| | |
+|---|---|
+| Branch | none created — whatever is checked out in `~/projects/my-app` |
+| Worktree | none — the main checkout itself |
+| Sandbox | `agent-my-app-workbench` |
+
+The agent edits the files your IDE has open, so changes show up there immediately, while it still
+runs in a sandbox. Switch branches in the IDE and the agent sees the new branch; it is the same
+sandbox either way, and it persists between runs, so the next `--here` re-attaches straight away.
+There is one workbench per project. For work you want to run in parallel, start a task as before.
+
+Run `--here` inside a task's worktree and it starts that task instead — never a second sandbox on the
+same directory.
+
+A changed Sandbox Kit is offered to the workbench exactly as to a task. To remove the workbench:
+
+```bash
+task-agent --done --here
+```
+
+This rescues its transcripts and removes the sandbox. Your checkout is not touched. Inside a task's
+worktree it is refused, because it would delete the directory you are standing in; run
+`task-agent --done <branch>` from the main checkout instead.
+
 ### See what exists
 
 ```bash
@@ -357,12 +401,13 @@ task-agent --list
 
 ```
 BRANCH             SANDBOX                              WORKTREE
+(workbench)        agent-my-app-workbench               /Users/me/projects/my-app
 feature/new-crud   agent-my-app-feature-new-crud-a84c9  /Users/me/projects/my-app-worktrees/feature-new-crud-a84c91
 spike/grid         -                                    /Users/me/projects/my-app-worktrees/spike-grid-1f0b2e
 -                  agent-my-app-old-branch-77c3de       -
 ```
 
-One row per task, and a `-` where one side of it is missing: a worktree whose sandbox was removed, or
+One row per task — plus the workbench, if there is one — and a `-` where one side of it is missing: a worktree whose sandbox was removed, or
 a sandbox whose worktree was. Nothing is read from a file `task-agent` wrote — the table is built from
 `git worktree list` and `sbx ls` on the spot, which is exactly why it can show a half-torn-down task
 at all.

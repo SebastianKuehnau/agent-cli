@@ -17,6 +17,14 @@ the host.
 **Sandbox** — the isolated Docker Sandboxes container a task's agent runs in. Named
 `agent-<project>-<branch-slug>-<hash>`. Created from a **template** and one **kit**.
 
+**Workbench** — a project's one sandbox that works directly in the main checkout, alongside the
+developer and their IDE, on whatever branch is checked out there. Started with `task-agent --here`
+from the main checkout; the same command run inside a task's worktree reaches that task instead, so
+`--here` always means "the agent for the checkout I am standing in".
+Unlike a task it owns no branch and no worktree: switching branches in the main checkout changes what
+the workbench's agent sees. It persists between invocations, so a quick question does not pay for a
+new sandbox. A workbench is not a task; tasks remain the way to run work in parallel.
+
 **Agent** — the AI coding tool running inside the sandbox. Currently always Claude Code.
 
 **Transcript** — the record of one agent session, belonging to the agent rather than to agent-cli. It

@@ -30,6 +30,11 @@ AGENT_LISTING_SH_LOADED=1
 # Shown in a column when the other side of a task is missing.
 readonly AGENT_LISTING_NONE="-"
 
+# Shown in the branch column for the workbench (issue #34). Not the branch that
+# happens to be checked out in the main checkout: that can change under a
+# running workbench at any moment, so printing it would be a guess.
+readonly AGENT_LISTING_WORKBENCH="(workbench)"
+
 # Every sandbox `sbx ls -q` reports, read once per run.
 declare -a AGENT_LISTING_KNOWN=()
 
@@ -110,6 +115,7 @@ listing_collected_has() {
 #
 # One row per task:
 #
+#   - the workbench, if this project has one, first and on the main checkout;
 #   - every linked worktree that has a branch, with the sandbox that branch
 #     would use, or "-" when no such sandbox exists;
 #   - every sandbox carrying this project's prefix that no such worktree
@@ -128,6 +134,17 @@ listing_collect_tasks() {
   AGENT_LISTING_BRANCHES=()
   AGENT_LISTING_SANDBOXES=()
   AGENT_LISTING_PATHS=()
+
+  # The workbench is recognised by name alone, the same way a task's sandbox
+  # is. It is added before the orphan pass below, which would otherwise report
+  # it as a sandbox with no worktree, because its name carries the prefix.
+  local workbench
+  workbench="$(naming_workbench_name "$project")"
+  if listing_known_has "$workbench"; then
+    AGENT_LISTING_BRANCHES+=("$AGENT_LISTING_WORKBENCH")
+    AGENT_LISTING_SANDBOXES+=("$workbench")
+    AGENT_LISTING_PATHS+=("${main_root%/}")
+  fi
 
   local current="" branch line sandbox
   while IFS= read -r line; do
