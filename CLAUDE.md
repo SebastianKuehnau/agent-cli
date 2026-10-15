@@ -438,11 +438,14 @@ no replace, no remove, and `sbx kit add --help` still says "appended to its orig
 also refuses sandboxes created before its recreate feature shipped, so it could never have been
 depended on unconditionally.
 
-**sbx v0.48.0 changed this (issue #37, undecided).** Re-adding the same-named kit now succeeds and
-*replaces* it: the kit list stays one entry, the changed content takes effect, and container files
-survive. `tests/spike/sandbox-kit.bats` now pins that down, and so fails on v0.42.1. The help text
-still says "appended", the command is still experimental, and the code still recreates. Whether to
-switch is the open question in #37 — do not switch without deciding it there.
+**sbx v0.48.0 changed this, and the decision stands anyway (issue #37).** Re-adding the same-named
+kit now succeeds and *replaces* it: one kit-list entry, changed content and network rules applied,
+container files kept. But the new kit's install steps then run on top of the kept container on
+*every* add — an unchanged step runs again, a removed step's effects stay — so the sandbox depends on
+its kit history rather than on the current kit, and every install step in every kit would have to be
+idempotent. task-agent cannot guarantee that for users' kits, so it keeps remove-then-create.
+`tests/spike/sandbox-kit.bats` keeps characterising `sbx kit add` (and so fails on v0.42.1), so a later
+change is visible; reopen #37 rather than switching on the strength of a passing spike.
 
 Three pieces, deliberately separate:
 
