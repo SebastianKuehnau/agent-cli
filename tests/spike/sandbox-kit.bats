@@ -28,9 +28,11 @@
 #     step's effects stay. Unlike a fresh sandbox, the result depends on
 #     history, so every install step would have to be idempotent.
 #
-# Whether task-agent should switch to it is not decided here; see issue #37.
-# The help text still says "appended to its original kit list", and the
-# command is still EXPERIMENTAL.
+# task-agent keeps remove-then-create anyway (decided in issue #37): the last
+# two findings make a sandbox depend on its kit history rather than on the
+# current kit. These tests stay so a later sbx change is visible. The help text
+# still says "appended to its original kit list", and the command is still
+# EXPERIMENTAL.
 #
 # Skipped automatically when sbx is unavailable, so the normal suite stays
 # runnable everywhere. Run explicitly with:
