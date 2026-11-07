@@ -170,13 +170,14 @@ is the one wording both paths use.
 Runtime: `bash`, `git`, `curl`, `sbx`. Nothing else — no `jq`, no Node, no `docker` CLI, no `gh`.
 `shasum` (macOS, via perl) or `sha256sum` is used for the short hash; one of the two is always present.
 
-**Minimum `sbx`: v0.42.0** (measured against v0.42.1). Older versions run, with two known costs.
-v0.38.0 fixed a destination-escape in `sbx cp`'s copy-out (CVE-2026-17106), which is the direction
-`lib/transcripts.sh` uses, so that is the floor. v0.42.0 is what makes transcript rule 3 below true:
-before it, a new sandbox reusing a deleted sandbox's name could inherit its files and agent session
-history. There is deliberately no version check in the code — a probe would mean parsing
-`sbx version --json` (a JSON parser, and `jq` is not a dependency) or its text output, to gate
-behaviour that degrades rather than breaks.
+**Minimum `sbx`: v0.51.0** (measured against v0.51.0, issue #43). That release resolves the `claude`
+agent to the published v3 kit `docker.io/sbx/claude` and refuses to compose it with v1/v2 kits, so the
+shipped presets are v3 and do not work on anything older. Earlier floors are subsumed: v0.38.0 fixed a
+destination-escape in `sbx cp`'s copy-out (CVE-2026-17106), v0.42.0 made transcript rule 3 below
+true, and v0.51.0 additionally blocks symlinks in mounted directories from escaping onto host paths —
+all three in the direction `lib/transcripts.sh` copies. There is deliberately no version check in the
+code — a probe would mean parsing `sbx version --json` (a JSON parser, and `jq` is not a dependency)
+or its text output. The one thing task-agent does check is the kit, see "A v2 project kit" below.
 
 Development only: `bats-core` for the tests and, optionally, `shellcheck`.
 
@@ -474,7 +475,20 @@ container files kept. But the new kit's install steps then run on top of the kep
 its kit history rather than on the current kit, and every install step in every kit would have to be
 idempotent. task-agent cannot guarantee that for users' kits, so it keeps remove-then-create.
 `tests/spike/sandbox-kit.bats` keeps characterising `sbx kit add` (and so fails on v0.42.1), so a later
-change is visible; reopen #37 rather than switching on the strength of a passing spike.
+change is visible; reopen #37 rather than switching on the strength of a passing spike. On v0.51.0
+(v3 kits) re-adding an *unchanged* kit still succeeds, but adding a *changed* one asks for
+confirmation on a terminal and has no flag to skip it (`error: stdin is not a terminal`), so the six
+spikes that add a changed kit fail there — one more reason, not a reason to switch.
+
+**A v2 project kit (issue #43).** On sbx v0.51.0 a recreate from a v2 kit would succeed at
+`sbx rm` and then fail at `sbx create`, leaving nothing. `scaffold_kit_is_legacy` recognises an
+uncommented top-level `schemaVersion: "1"`/`"2"` and nothing else, so it can never refuse a kit sbx
+would accept. `session_sync_kit` checks it **before asking and before removing**, reports the change
+as not applicable and records nothing, so the existing sandbox stays usable and a migrated kit is
+offered next time. The create paths (`session_start`, `session_workbench_start`) call
+`scaffold_require_current_kit` right before `sandbox_create` and fail with the migration hint;
+attaching to an existing sandbox is never refused. The check reads the kit file only — it is not a
+version probe, and it does not loosen "no version check".
 
 Three pieces, deliberately separate:
 
@@ -541,12 +555,14 @@ re-running that validation first.
 only when the downloaded spec actually contains it, so a spec without it is moved into place untouched
 — which is what keeps `--init` a byte-for-byte copy for every spec that does not ask for otherwise. The
 replacement value comes from `naming_project_id`, whose output is `[a-z0-9-]` only; that is what makes a
-plain `sed "s///"` safe here with no quoting. The substitution is **cosmetic**: the kit name shows up in
-`sbx kit inspect`, while per-sandbox policy rules are labelled from the *sandbox* name, so a wrong kit
-name changes no behaviour.
+plain `sed "s///"` safe here with no quoting. The substitution is **cosmetic**: v3 has no `name:` field
+(strict decoding rejects it), so the sentinel sits in `displayName` and `description`, which only show
+up in `sbx kit inspect`; per-sandbox policy rules are labelled from the *sandbox* name, so a wrong
+display name changes no behaviour.
 
 `tests/unit/scaffold.bats` guards the contract between the shipped presets and the code: every name in
-`scaffold_preset_url` must have a file, every file must use the sentinel and declare schema version 2,
+`scaffold_preset_url` must have a file, every file must use the sentinel in its `displayName`, be a
+schema v3 kit (the `# syntax=docker/sandbox-kit:3` line first, no v2 top-level keys) and install JDK 25,
 and `TASK_AGENT_PRESET_BASE_URL` must point at this repository. Add a preset by adding both the table
 entry and the file — the test fails if you add only one.
 
@@ -607,13 +623,14 @@ Skills and Claude Code configuration are **kit content, not a task-agent feature
 a flag, a template or a `.claude/` writer for this.
 
 The `vaadin-claude` preset is where the configuration lives: the Vaadin skills plus
-`mattpocock-skills@claude-plugins-official`, and a `setup.install` step that writes
-`~/.claude/statusline.sh` and configures it as the status line. `generic` and `vaadin` stay
-unchanged; presets do not compose, so the combination ships as its own name.
+`mattpocock-skills@claude-plugins-official`, a `lifecycle@1` `files:` entry that writes
+`~/.claude/statusline.sh`, and an install hook that configures it as the status line. `generic` and
+`vaadin` carry none of this; presets do not compose, so the combination ships as its own name.
 
-Four facts about the sandbox that the step depends on, all established by inspecting a running one:
+Four facts about the sandbox that the hook depends on, all established by inspecting a running one
+(re-measured on sbx v0.51.0 with `docker.io/sbx/claude`, Claude Code 2.1.319):
 
-- `~/.claude/settings.json` is container-local **and seeded by Docker Sandboxes**, so the step merges
+- `~/.claude/settings.json` is container-local **and seeded by Docker Sandboxes**, so the hook merges
   into it with `jq`. Writing the file would discard what sbx seeded.
 - `~/.claude/skills` is a **read-write mount of the host's** skills directory. A kit must never write
   there — it would install onto the developer's machine. Plugins are container-local; skills go
@@ -625,14 +642,14 @@ Four facts about the sandbox that the step depends on, all established by inspec
 `tests/unit/scaffold.bats` asserts the shape of the shipped preset — status line present, settings
 merged rather than overwritten, nothing written to `~/.claude/skills`, both plugins installed. Whether
 any of it *works* is only knowable from `tests/spike/sandbox-preset-claude.bats`, which needs a real
-sbx and skips without one. It is also the only check that the kit schema accepts the multi-line
-command; every other shipped `setup.install` command is a one-liner.
+sbx and skips without one.
 
 ## How the agent itself is kept up to date
 
-Claude Code is baked into `docker/sandbox-templates:claude-code`, and nothing inside a sandbox ever
-refreshes it — a sandbox built from a three-week-old image runs a three-week-old agent (issue #19).
-Every shipped preset therefore carries `claude update || true` as its first `setup.install` step.
+Claude Code is baked into the workload image (`docker.io/sbx/claude` since sbx v0.51.0), and nothing
+inside a sandbox ever refreshes it — a sandbox built from a three-week-old image runs a three-week-old
+agent (issue #19). Every shipped preset therefore carries `claude update || true` as its first install
+hook.
 
 Four things about that decision:
 
@@ -644,12 +661,12 @@ Four things about that decision:
   reach the network must not fail sandbox creation, because the image's version still works. Without
   the guard every offline `task-agent <branch>` would fail at creation. This is the opposite of a
   `|| true` that hides a command which can never work.
-- **The generic preset carries it too.** An out-of-date agent is not a Vaadin-specific problem, and
-  `generic` gained its first `setup:` block for this.
+- **The generic preset carries it too.** An out-of-date agent is not a Vaadin-specific problem.
 - **It only runs at creation, so a long-lived sandbox still ages.** The accepted answer is `--done`
   and start the task again. Verified against a real sandbox: the step took ~7s and moved a fresh
   sandbox from the image's 2.1.246 to 2.1.267, with no addition to the kit's network allowlist —
-  the claude agent kit's own allowlist already reaches the release host.
+  the claude agent kit's own allowlist already reaches the release host. Re-verified on sbx v0.51.0
+  as a v3 install hook: 2.1.318 to 2.1.319, still with no install-phase allowlist entry for it.
 
 `tests/unit/scaffold.bats` asserts every shipped preset has the step and keeps the guard;
 `tests/spike/sandbox-preset-claude.bats` is the only check that it actually updates anything, and it
@@ -658,15 +675,31 @@ skips without a real sbx.
 ## No custom template image
 
 agent-cli passes no `-t`, and there is no Dockerfile here. That is a measured decision, not an
-omission: `docker/sandbox-templates:claude-code` already ships OpenJDK 25.0.3, Node 22, npm, Python
-3.14, a Docker daemon, and passwordless `sudo` for the `agent` user. `mvn` is absent, but Vaadin
-projects carry the Maven wrapper and `repo.maven.apache.org` is in the kit's allowlist. SDKMAN is
-absent, so a `sdk install java …` line in a kit is dead code — it cannot work, and `|| true` only hides
-that.
+omission. Since sbx v0.51.0 the workload is `docker.io/sbx/claude` (Docker Hardened Images, Debian 13),
+measured on v0.51.0: Python 3.14, a Docker daemon, passwordless `sudo` for the `agent` user, `jq`,
+`git`, `curl` and `apt-get` with `deb.debian.org` and `dhi.io` as sources. **No JDK and no Node** —
+the previous image (`docker/sandbox-templates:claude-code`) had OpenJDK 25 and Node 22, so the presets
+now install them:
 
-The one thing genuinely missing is browser binaries, which is why the `vaadin` preset installs them at
-setup time instead. Reach for a custom image only when that download cost per sandbox becomes the
-problem, and note it would require a `-t` passthrough, which "Scope discipline" forbids.
+- **JDK 25** (`openjdk-25-jdk-headless` from Debian; `default-jdk` would be 21) in every preset, with
+  `update-ca-certificates -f` afterwards: the JDK's truststore stays empty until it runs, and Maven
+  then fails with `trustAnchors parameter must be non-empty`. `JAVA_HOME` points at the
+  `/usr/lib/jvm/default-java` symlink the hook creates.
+- **Node** (Debian's, v20) in the Vaadin presets only, for Playwright's installer. Vaadin 25's own
+  frontend build wants a newer Node and installs it into `~/.vaadin` itself.
+- **Playwright** as two hooks: `install-deps` as root, `install chromium` as the agent, so the browser
+  lands in the agent's `~/.cache`. The Chromium download comes from `storage.googleapis.com`, which
+  is therefore in the install-phase allowlist only.
+
+`mvn` is absent, but Vaadin projects carry the Maven wrapper and `repo.maven.apache.org` is in the
+kit's allowlist. SDKMAN is absent, so a `sdk install java …` line in a kit is dead code. Reach for a
+custom image only when the per-sandbox install cost becomes the problem, and note it would require a
+`-t` passthrough, which "Scope discipline" forbids.
+
+Two v3 rules every install hook depends on: the **install phase has its own network allowlist**
+(`network-policy@1` `config.install.allow`), closed before the agent starts, and the global sbx policy
+does not apply to it; and a hook's **environment is deny-by-default** — it sees `PATH`, `HOME` and a
+few shell basics, anything else only when listed in its `env:`.
 
 ## How the version and `--update`'s version check work
 

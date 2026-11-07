@@ -89,3 +89,17 @@ The decision is unchanged. The licence case now has a by-hand route that needs n
 `task-agent` does **not** run that mount itself. It is not an option passthrough, but it would be the
 first Vaadin-specific behaviour in a tool that is otherwise project-agnostic — the same boundary as
 ADR 0003. It is documented in `README.md` as a step the user takes once per sandbox.
+
+## Re-measured on sbx v0.51.0 (2026-11-07)
+
+The decision is unchanged, and one of its premises is gone in a way that supports it
+([#43](https://github.com/SebastianKuehnau/agent-cli/issues/43)):
+
+- **A v3 kit can declare a port.** `com.docker.sandbox/port@1` with `container: 8080` was published
+  on create, at a host port sbx chose (`127.0.0.1:49152`). The kit cannot pin the host side — the
+  spec reserves that for the runtime's own UX — so `sbx ports <sandbox> --publish 8080` is still the
+  way to get a fixed port. Either way the project expresses it, not task-agent: the kit route needs
+  no passthrough at all.
+- Environment variables are v3 `args` with `env:`. Their `default` is a literal in the kit file, so
+  committing a secret is still the only way to put one there; interpolation of `${VAR}` in an arg
+  default was not measured.

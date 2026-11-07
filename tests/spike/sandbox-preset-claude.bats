@@ -2,14 +2,14 @@
 #
 # Spike: does the vaadin-claude preset's agent configuration actually arrive?
 #
-# The preset writes ~/.claude/statusline.sh and merges ~/.claude/settings.json
-# from a `setup.install` step, and installs two skill plugins. None of that can
-# be checked without a real sbx, and three of its assumptions would fail
-# silently inside a sandbox rather than loudly at --init time:
+# The preset writes ~/.claude/statusline.sh through `lifecycle@1` `files:`,
+# merges ~/.claude/settings.json from an install hook, installs two skill
+# plugins, and — since sbx v0.51.0's workload ships none — a JDK and Playwright
+# (issue #43). None of that can be checked without a real sbx, and these
+# assumptions would fail silently inside a sandbox rather than loudly at --init
+# time:
 #
-#   1. the kit schema accepts a *multi-line* command (a YAML block scalar
-#      containing a heredoc) — every other command in the shipped presets is a
-#      one-liner;
+#   1. sbx accepts the shipped preset as a v3 kit at all;
 #   2. ~/.claude/settings.json is container-local and merged, not replaced —
 #      Docker Sandboxes seeds that file, and overwriting it would throw the
 #      seeded configuration away;
@@ -63,8 +63,8 @@ teardown() {
   sbx rm --force "$SANDBOX" >/dev/null 2>&1 || sbx rm "$SANDBOX" >/dev/null 2>&1 || true
 }
 
-# create_sandbox — the real thing: the claude agent, because the preset's setup
-# steps call the `claude` CLI. The `shell` agent the other spikes use would not
+# create_sandbox — the real thing: the claude agent, because the preset's install
+# hooks call the `claude` CLI. The `shell` agent the other spikes use would not
 # have it.
 create_sandbox() {
   sandbox_create "$SANDBOX" "$KIT_DIR" "$REPO"
@@ -77,10 +77,32 @@ in_sandbox() {
 
 # --- the kit schema ---------------------------------------------------------
 
-@test "sbx accepts the preset's multi-line setup command" {
-  # If this fails, the block scalar has to become a one-liner (bash -c '...').
+@test "sbx validates the shipped preset as a v3 kit" {
   run sbx kit validate "$KIT_DIR"
   assert_success
+}
+
+# --- the toolchain the workload image lacks (issue #43) ---------------------
+
+@test "JDK 25 is installed, on JAVA_HOME, with a populated truststore" {
+  create_sandbox
+
+  run in_sandbox bash -lc '"$JAVA_HOME/bin/java" -version 2>&1'
+  assert_success
+  [[ "$output" == *'version "25'* ]] || fail "not JDK 25: $output"
+
+  # An empty truststore makes every Maven download fail with
+  # "trustAnchors parameter must be non-empty".
+  run in_sandbox bash -c 'test -s /etc/ssl/certs/java/cacerts'
+  assert_success
+}
+
+@test "the Playwright browser lands in the agent's cache" {
+  create_sandbox
+
+  run in_sandbox bash -c 'ls "$HOME/.cache/ms-playwright"'
+  assert_success
+  [[ "$output" == *chromium* ]] || fail "no chromium for the agent: $output"
 }
 
 # --- what lands in the sandbox ----------------------------------------------
@@ -154,9 +176,9 @@ in_sandbox() {
 # --- the agent's own version (issue #19) ------------------------------------
 
 @test "the sandbox's Claude Code is the current release, not the image's" {
-  # The setup step runs `claude update`. If the network policy blocked it, or
+  # The install hook runs `claude update`. If the network policy blocked it, or
   # `|| true` swallowed a real failure, the agent would silently be whatever
-  # the template image happened to ship. Asking `claude update` again is the
+  # the workload image happened to ship. Asking `claude update` again is the
   # check: on a sandbox that already updated it reports being up to date,
   # having nothing left to do.
   create_sandbox

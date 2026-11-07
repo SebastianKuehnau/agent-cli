@@ -54,9 +54,9 @@ setup() {
   # needs no agent authentication and no agent-specific image.
   mkdir -p "$REPO/.sbx/kit"
   cat >"$REPO/.sbx/kit/spec.yaml" <<'EOF'
-schemaVersion: "2"
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
 kind: mixin
-name: agent-cli-spike
 displayName: agent-cli worktree spike
 description: Minimal kit used only to verify linked-worktree behaviour.
 EOF

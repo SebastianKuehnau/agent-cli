@@ -16,7 +16,7 @@ setup() {
   make_repo "$REPO" >/dev/null
 
   mkdir -p "$REPO/.sbx/kit"
-  printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
 
   make_fake_sbx "$TMP/fake"
 

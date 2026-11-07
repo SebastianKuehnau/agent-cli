@@ -21,7 +21,7 @@ setup() {
   REPO="$TMP/my-app"
   make_repo "$REPO" >/dev/null
   mkdir -p "$REPO/.sbx/kit"
-  printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
 
   SANDBOX="agent-my-app-feature-x-a84c91"
 }
@@ -62,7 +62,7 @@ setup() {
 @test "editing spec.yaml changes the digest" {
   local before
   before="$(scaffold_kit_hash "$REPO")"
-  printf 'schemaVersion: "2"\nkind: mixin\nname: changed\n' >"$REPO/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\ndisplayName: changed\n' >"$REPO/.sbx/kit/spec.yaml"
   assert_not_equal "$(scaffold_kit_hash "$REPO")" "$before"
 }
 

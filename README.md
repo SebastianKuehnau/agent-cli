@@ -15,12 +15,12 @@ to `git` immediately — the sandbox is the isolation boundary, not a copy of yo
 `bash`, `git`, `curl`, and the [Docker Sandboxes CLI](https://docs.docker.com/reference/cli/sbx/)
 (`sbx`). Nothing else.
 
-`sbx` **v0.42.0 or newer** is recommended, and nothing here is checked against anything older than
-v0.38.0. Older versions still work; two things degrade. v0.38.0 fixed a destination-escape in
-`sbx cp`'s copy-out (CVE-2026-17106), which is how `task-agent` gets an agent's transcripts out of a
-sandbox. v0.42.0 stopped a new sandbox that reuses a deleted sandbox's name from inheriting its files
-and agent session history, which is what makes the transcript rescue copy each transcript exactly
-once.
+`sbx` **v0.51.0 or newer** is required. From v0.51.0 on, sbx runs the claude agent from a published
+schema v3 kit and refuses to combine it with older kits, so the presets `--init` hands out are v3 kits
+— and a project kit written by an earlier `--init` has to be migrated once (see
+[Migrating a v2 kit](#migrating-a-v2-kit-sbx-v0510)). v0.51.0 also stops `sbx cp` from following
+symbolic links out of a mounted directory, which is the direction `task-agent` copies an agent's
+transcripts in.
 
 ## Install
 
@@ -146,11 +146,15 @@ task-agent --init vaadin-claude
 
 | Preset | Contains |
 | --- | --- |
-| `generic` | `JAVA_HOME`, Maven and GitHub network access, and a Claude Code update. Deliberately small. |
-| `vaadin` | the above, plus the Vaadin skills and MCP, and Playwright browsers |
+| `generic` | JDK 25 and `JAVA_HOME`, Maven and GitHub network access, and a Claude Code update. Deliberately small. |
+| `vaadin` | the above, plus the Vaadin skills and MCP, and Node with Playwright browsers |
 | `vaadin-claude` | the above, plus general engineering skills and a status line showing context-window usage |
 
-All three update Claude Code when the sandbox is built. The sandbox template image bakes in whichever
+All three are schema v3 kits and install a JDK, because the claude workload image sbx v0.51.0 uses
+(`docker.io/sbx/claude`, Debian 13) ships none. It does ship Python, Docker, `sudo`, `jq`, `git` and
+`curl`.
+
+All three update Claude Code when the sandbox is built. The workload image bakes in whichever
 version was current when it was published, and nothing inside a sandbox ever refreshes it, so without
 this step an image a few weeks old means an agent a few weeks old. The step costs a few seconds per
 sandbox and cannot fail the build: if it cannot reach the network it gives up and the image's version
@@ -211,7 +215,7 @@ MCP servers, the status line — is a separate thing, and comes from the kit:
 `task-agent` writes no agent configuration — no `.claude/settings.json`, no `CLAUDE.md`, no MCP file.
 Everything the agent needs inside a sandbox comes from the kit, which is why the `vaadin-claude`
 preset exists (see [ADR 0003](docs/adr/0003-agent-configuration-lives-in-the-preset-kit.md)). Its
-`setup.install` steps do three things:
+install hooks and `files:` entry do three things:
 
 - install the Vaadin skills and MCP (`vaadin-skills@vaadin-marketplace`);
 - install general engineering skills — tdd, code review, bug diagnosis and so on
@@ -223,7 +227,7 @@ preset exists (see [ADR 0003](docs/adr/0003-agent-configuration-lives-in-the-pre
   Opus 5 [####------] 42%
   ```
 
-Two details are load-bearing if you edit that step:
+Two details are load-bearing if you edit those steps:
 
 - `~/.claude/settings.json` is seeded by Docker Sandboxes, so the step **merges** into it with `jq`
   rather than writing it. Overwriting it throws away what sbx put there.
@@ -258,8 +262,10 @@ Three things that do **not** work, each verified:
   says `Generated placeholder: sbx-cs-…`; the real value is substituted by the proxy into outbound
   request headers. An offline key is checked locally, so there is no request to rewrite and the
   placeholder fails the signature check.
-- **Kit `environment.variables` do not interpolate.** A kit declaring `${VAADIN_OFFLINE_KEY}` delivers
-  the literal string `${VAADIN_OFFLINE_KEY}`. Putting the real value in the kit means committing it.
+- **Kit variables do not interpolate.** Measured with v2 `environment.variables`: a kit declaring
+  `${VAADIN_OFFLINE_KEY}` delivers the literal string `${VAADIN_OFFLINE_KEY}`. In v3 a variable is an
+  `args` entry whose `default` is likewise a literal in the kit file. Either way, putting the real
+  value in the kit means committing it.
 - **`sbx setup`** imports secrets only for the built-in agent services, not arbitrary ones.
 
 What **does** work, since `sbx mount` (measured on v0.48.0): mount your offline key file read-only
@@ -291,11 +297,23 @@ see [ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).
 
 #### Ports
 
-A kit cannot publish ports; the kit schema has no `ports` field. Publish them on the running sandbox:
+To publish a port on a running sandbox, at a host port you choose:
 
 ```bash
 sbx ls                                        # find the sandbox name
 sbx ports agent-my-app-feature-x-a1b2c3 --publish 8080
+```
+
+Since schema v3 a kit can also ask for a port itself, with `com.docker.sandbox/port@1`. sbx then
+picks the host side — a free loopback port, `127.0.0.1:49152` when measured on v0.51.0 — so look it
+up with `sbx ports <sandbox>`. A kit cannot pin the host port; use `sbx ports --publish` for that.
+
+```yaml
+capabilities:
+  - type: com.docker.sandbox/port@1
+    config:
+      name: devserver
+      container: 8080
 ```
 
 Since `sbx` v0.42.0 a published port listens on IPv4 only unless you name the protocol
@@ -304,8 +322,39 @@ server inside the sandbox that binds IPv4. The same version made `sbx ports --pu
 sandbox by itself, so the command above no longer has to be typed while the agent is running.
 
 Inside the sandbox, `localhost` is the sandbox itself. Services on your **host** are reachable as
-`host.docker.internal`, and the network rule for them is written with the loopback name — a rule for
-`localhost:11434` is what makes `host.docker.internal:11434` reachable.
+`host.docker.internal`, and the network rule for them is written with the loopback name — a
+`localhost:11434` entry in the kit's `network-policy@1` `runtime.allow` list is what makes
+`host.docker.internal:11434` reachable.
+
+### Migrating a v2 kit (sbx v0.51.0)
+
+A project initialised before sbx v0.51.0 has a schema v2 kit (`schemaVersion: "2"`), and sbx v0.51.0
+refuses to create a sandbox from it. `task-agent` checks first and stops before creating anything:
+
+```text
+[task-agent] error: .sbx/kit/spec.yaml is a schema v2 Sandbox Kit, and sbx v0.51.0 and later
+only combine the claude agent with v3 kits.
+```
+
+Start from a v3 preset and carry your own changes over:
+
+```bash
+mv .sbx/kit .sbx/kit.v2
+task-agent --init vaadin            # or generic / vaadin-claude
+# port your additions from .sbx/kit.v2/spec.yaml, then delete .sbx/kit.v2
+```
+
+The format changed in more than its version number: `setup.install` became install hooks under
+`com.docker.sandbox/lifecycle@1`, `permissions.network.allow` became `network-policy@1` with separate
+`install` and `runtime` allowlists, `environment.variables` became `args` with `env:`, and `name:` is
+gone. Install hooks see only `PATH`, `HOME` and a few shell basics; list anything else in the hook's
+`env:`. The [v3 specification](https://github.com/docker/sandbox-kit-spec/blob/main/docs/spec/SPEC-v3.md)
+has the details, and the shipped presets are worked examples.
+
+Sandboxes that already exist keep working with the kit they were built from: `task-agent` still
+attaches to them. It will not rebuild one from a v2 kit, though — that would remove the sandbox and
+then fail to create its replacement — so a changed v2 kit is reported and left alone until it is
+migrated.
 
 ### Updating the Sandbox Kit
 
@@ -326,7 +375,8 @@ removing or renaming any file in it counts as a change. Moving your checkout som
 from the current kit. It does not use `sbx kit add`. Since sbx v0.48.0 that command can replace a kit
 in place and keep the container, but it reruns the kit's install steps on top of whatever the
 container already holds, so the result depends on the sandbox's history rather than on the kit
-([#37](https://github.com/SebastianKuehnau/agent-cli/issues/37)). Recreating loses whatever exists
+([#37](https://github.com/SebastianKuehnau/agent-cli/issues/37)); since v0.51.0 it also asks for
+confirmation on a terminal whenever the kit changed. Recreating loses whatever exists
 only inside the container, so `task-agent` asks first, and tells you what is at stake:
 
 ```text

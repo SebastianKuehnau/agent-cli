@@ -1,6 +1,6 @@
-schemaVersion: "2"
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
 kind: mixin
-name: __PROJECT__
 displayName: __PROJECT__ Vaadin + Claude dev environment
 description: >-
   The vaadin preset plus agent configuration: the Vaadin and mattpocock skill
@@ -12,101 +12,171 @@ description: >-
 # This is `vaadin` with the agent's own configuration added. task-agent itself
 # never writes agent configuration (ADR 0003); everything below is
 # ordinary kit setup, so it is yours to edit or delete once --init has copied it.
+#
+# Schema v3 (sbx v0.51.0+, issue #43). The first line is load-bearing: without it
+# sbx parses this file as a Dockerfile. This kit is composed with the claude
+# workload (docker.io/sbx/claude, Debian 13), which ships Python, Docker, sudo,
+# jq, git and curl — but no JDK and no Node; both are installed below.
+#
+# Install hooks see only PATH, HOME and a few shell basics; any other variable
+# must be listed in the hook's `env:`. The install phase has its own network
+# allowlist, closed before the agent starts.
 
-setup:
-  install:
-    # Claude Code is baked into the sandbox template image, and nothing in the
-    # sandbox ever updates it — an image a few weeks old means an agent a few
-    # weeks old (issue #19). This brings it to the current release when the
-    # sandbox is built.
-    #
-    # `|| true` on purpose: an update that cannot reach the network must not
-    # fail sandbox creation. The version from the image still works, so a
-    # best-effort refresh is worth strictly more than a sandbox that refuses to
-    # start when you are offline.
-    - command: "claude update || true"
-      user: "1000"
+# v3 has no `environment:` block; a container variable is an arg with `env:`.
+args:
+  # A symlink, not the versioned dir, which names both JDK version and CPU
+  # architecture. The install hook below creates it.
+  javaHome:
+    default: /usr/lib/jvm/default-java
+    description: JAVA_HOME inside the sandbox
+    env: JAVA_HOME
 
-    # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
-    - command: "claude plugin marketplace add vaadin/agent-marketplace && claude plugin install vaadin-skills@vaadin-marketplace"
-      user: "1000"
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      # Open only while the install hooks run.
+      install:
+        allow:
+          # apt: the two sources the claude image configures.
+          - deb.debian.org
+          - dhi.io
 
-    # General engineering skills: tdd, code-review, diagnosing-bugs, ...
-    - command: "claude plugin marketplace add anthropics/claude-plugins-official && claude plugin install mattpocock-skills@claude-plugins-official"
-      user: "1000"
+          # Claude plugin marketplaces and installs.
+          - github.com
+          - codeload.github.com
+          - raw.githubusercontent.com
 
-    # No browsers in the image. `--with-deps` needs root; `agent` has passwordless sudo.
-    # Drop this step if the project has no browser tests.
-    - command: "sudo npx --yes playwright install --with-deps chromium"
-      user: "1000"
+          # npx fetching Playwright, and the browsers it downloads. Chromium itself
+          # comes from Chrome for Testing on storage.googleapis.com — a broad host,
+          # which is why it is allowed for the install phase only.
+          - registry.npmjs.org
+          - cdn.playwright.dev
+          - playwright.download.prss.microsoft.com
+          - storage.googleapis.com
 
-    # Status line: "<model> [####------] 42%" — the model and how much of the
-    # context window is used. Written here rather than by task-agent, which does
-    # not manage agent configuration.
-    #
-    # ~/.claude/settings.json is container-local and seeded by Docker Sandboxes,
-    # so this step *merges* into it and never overwrites it. ~/.claude/skills, by
-    # contrast, is a read-write mount of the host directory — never write there.
-    - command: |
-        set -e
-        if ! command -v jq >/dev/null 2>&1; then
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq
-        fi
-        mkdir -p "$HOME/.claude"
-        cat >"$HOME/.claude/statusline.sh" <<'SH'
-        #!/bin/bash
-        input=$(cat)
-        model=$(echo "$input" | jq -r '.model.display_name')
-        used=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
-        used_int=$(printf '%.0f' "$used")
-        bar_width=10
-        filled=$(( used_int * bar_width / 100 ))
-        if [ "$filled" -gt "$bar_width" ]; then filled=$bar_width; fi
-        empty=$(( bar_width - filled ))
-        bar=""
-        for ((i=0; i<filled; i++)); do bar="${bar}#"; done
-        for ((i=0; i<empty; i++)); do bar="${bar}-"; done
-        printf "\033[2m%s [%s] %s%%\033[0m" "$model" "$bar" "$used_int"
-        SH
-        chmod +x "$HOME/.claude/statusline.sh"
-        settings="$HOME/.claude/settings.json"
-        [ -s "$settings" ] || printf '{}\n' >"$settings"
-        tmp="$(mktemp)"
-        # The enabledPlugins lines are belt and braces: `claude plugin install`
-        # normally sets them, and setting them again is a no-op.
-        jq --arg cmd "$HOME/.claude/statusline.sh" '
-          .statusLine = {type: "command", command: $cmd}
-          | .enabledPlugins["vaadin-skills@vaadin-marketplace"] = true
-          | .enabledPlugins["mattpocock-skills@claude-plugins-official"] = true
-        ' "$settings" >"$tmp"
-        mv "$tmp" "$settings"
-      user: "1000"
+      runtime:
+        allow:
+          # Maven. No `mvn` in the image; the wrapper downloads it from here.
+          - repo.maven.apache.org
+          - repo1.maven.org
+          - central.sonatype.com
 
-environment:
-  variables:
-    # Base image ships a JDK but leaves JAVA_HOME unset. Symlink, not the
-    # versioned dir, which names both JDK version and CPU architecture.
-    JAVA_HOME: "/usr/lib/jvm/default-java"
+          # Claude plugin marketplaces and installs.
+          - github.com
+          - codeload.github.com
+          - raw.githubusercontent.com
 
-permissions:
-  network:
-    allow:
-      # Maven. No `mvn` in the image; the wrapper downloads it from here.
-      - repo.maven.apache.org
-      - repo1.maven.org
-      - central.sonatype.com
+          # Vaadin docs, MCP, Javadoc.
+          - vaadin.com
+          - mcp.vaadin.com
+          - www.javadocs.dev
 
-      # Claude plugin marketplaces and installs.
-      - github.com
-      - codeload.github.com
-      - raw.githubusercontent.com
+          # Playwright browsers: primary host plus the installer's fallback.
+          - cdn.playwright.dev
+          - playwright.download.prss.microsoft.com
 
-      # Vaadin docs, MCP, Javadoc.
-      - vaadin.com
-      - mcp.vaadin.com
-      - www.javadocs.dev
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        # Claude Code is baked into the workload image, and nothing in the
+        # sandbox ever updates it — an image a few weeks old means an agent a
+        # few weeks old (issue #19). This brings it to the current release when
+        # the sandbox is built.
+        #
+        # `|| true` on purpose: an update that cannot reach the network must not
+        # fail sandbox creation. The version from the image still works, so a
+        # best-effort refresh is worth strictly more than a sandbox that refuses
+        # to start when you are offline.
+        - description: Update Claude Code
+          user: "1000"
+          command: "claude update || true"
 
-      # Playwright browsers: primary host plus the installer's fallback.
-      - cdn.playwright.dev
-      - playwright.download.prss.microsoft.com
+        # The image's ca-certificates-java leaves the JDK's truststore empty until
+        # update-ca-certificates runs; without it every Maven download fails with
+        # "trustAnchors parameter must be non-empty". `default-jdk` would be 21.
+        #
+        # Node is here for Playwright's installer only. Vaadin's own frontend build
+        # does not use this Node 20: Vaadin 25 wants a newer one and installs it
+        # into ~/.vaadin itself.
+        - description: Install JDK 25 and Node
+          user: "0"
+          command: |
+            set -e
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends openjdk-25-jdk-headless ca-certificates-java nodejs npm
+            update-ca-certificates -f
+            ln -sfn "$(ls -d /usr/lib/jvm/java-25-openjdk-*)" /usr/lib/jvm/default-java
+
+        # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
+        - description: Install the Vaadin Claude plugin
+          user: "1000"
+          command: "claude plugin marketplace add vaadin/agent-marketplace && claude plugin install vaadin-skills@vaadin-marketplace"
+
+        # General engineering skills: tdd, code-review, diagnosing-bugs, ...
+        - description: Install the mattpocock skills plugin
+          user: "1000"
+          command: "claude plugin marketplace add anthropics/claude-plugins-official && claude plugin install mattpocock-skills@claude-plugins-official"
+
+        # No browsers in the image. The system libraries need root, the browser
+        # itself belongs in the agent's ~/.cache — so two steps, as two users.
+        # Drop both if the project has no browser tests.
+        #
+        # HOME=/root is load-bearing: hooks inherit the image's HOME
+        # (/home/agent) whatever their user, so without it root's npx writes a
+        # root-owned ~/.npm into the agent's home and the next step fails with
+        # EACCES.
+        - description: Install Playwright's system dependencies
+          user: "0"
+          command: "HOME=/root npx --yes playwright install-deps chromium"
+        - description: Install the Playwright browser
+          user: "1000"
+          command: "npx --yes playwright install chromium"
+
+        # Status line: "<model> [####------] 42%" — the model and how much of the
+        # context window is used. Configured here rather than by task-agent, which
+        # does not manage agent configuration. The script itself is written by
+        # `files:` below.
+        #
+        # ~/.claude/settings.json is container-local and seeded by Docker
+        # Sandboxes, so this step *merges* into it and never overwrites it.
+        # ~/.claude/skills, by contrast, is a read-write mount of the host
+        # directory — never write there.
+        - description: Configure the status line
+          user: "1000"
+          command: |
+            set -e
+            if ! command -v jq >/dev/null 2>&1; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq jq
+            fi
+            mkdir -p "$HOME/.claude"
+            settings="$HOME/.claude/settings.json"
+            [ -s "$settings" ] || printf '{}\n' >"$settings"
+            tmp="$(mktemp)"
+            # The enabledPlugins lines are belt and braces: `claude plugin install`
+            # normally sets them, and setting them again is a no-op.
+            jq --arg cmd "$HOME/.claude/statusline.sh" '
+              .statusLine = {type: "command", command: $cmd}
+              | .enabledPlugins["vaadin-skills@vaadin-marketplace"] = true
+              | .enabledPlugins["mattpocock-skills@claude-plugins-official"] = true
+            ' "$settings" >"$tmp"
+            mv "$tmp" "$settings"
+
+      files:
+        - path: /home/agent/.claude/statusline.sh
+          mode: "0755"
+          description: Status line script
+          content: |
+            #!/bin/bash
+            input=$(cat)
+            model=$(echo "$input" | jq -r '.model.display_name')
+            used=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
+            used_int=$(printf '%.0f' "$used")
+            bar_width=10
+            filled=$(( used_int * bar_width / 100 ))
+            if [ "$filled" -gt "$bar_width" ]; then filled=$bar_width; fi
+            empty=$(( bar_width - filled ))
+            bar=""
+            for ((i=0; i<filled; i++)); do bar="${bar}#"; done
+            for ((i=0; i<empty; i++)); do bar="${bar}-"; done
+            printf "\033[2m%s [%s] %s%%\033[0m" "$model" "$bar" "$used_int"
