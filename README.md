@@ -262,8 +262,10 @@ Three things that do **not** work, each verified:
   says `Generated placeholder: sbx-cs-…`; the real value is substituted by the proxy into outbound
   request headers. An offline key is checked locally, so there is no request to rewrite and the
   placeholder fails the signature check.
-- **Kit `environment.variables` do not interpolate.** A kit declaring `${VAADIN_OFFLINE_KEY}` delivers
-  the literal string `${VAADIN_OFFLINE_KEY}`. Putting the real value in the kit means committing it.
+- **Kit variables do not interpolate.** Measured with v2 `environment.variables`: a kit declaring
+  `${VAADIN_OFFLINE_KEY}` delivers the literal string `${VAADIN_OFFLINE_KEY}`. In v3 a variable is an
+  `args` entry whose `default` is likewise a literal in the kit file. Either way, putting the real
+  value in the kit means committing it.
 - **`sbx setup`** imports secrets only for the built-in agent services, not arbitrary ones.
 
 What **does** work, since `sbx mount` (measured on v0.48.0): mount your offline key file read-only
@@ -295,11 +297,23 @@ see [ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).
 
 #### Ports
 
-A kit cannot publish ports; the kit schema has no `ports` field. Publish them on the running sandbox:
+To publish a port on a running sandbox, at a host port you choose:
 
 ```bash
 sbx ls                                        # find the sandbox name
 sbx ports agent-my-app-feature-x-a1b2c3 --publish 8080
+```
+
+Since schema v3 a kit can also ask for a port itself, with `com.docker.sandbox/port@1`. sbx then
+picks the host side — a free loopback port, `127.0.0.1:49152` when measured on v0.51.0 — so look it
+up with `sbx ports <sandbox>`. A kit cannot pin the host port; use `sbx ports --publish` for that.
+
+```yaml
+capabilities:
+  - type: com.docker.sandbox/port@1
+    config:
+      name: devserver
+      container: 8080
 ```
 
 Since `sbx` v0.42.0 a published port listens on IPv4 only unless you name the protocol
@@ -308,8 +322,9 @@ server inside the sandbox that binds IPv4. The same version made `sbx ports --pu
 sandbox by itself, so the command above no longer has to be typed while the agent is running.
 
 Inside the sandbox, `localhost` is the sandbox itself. Services on your **host** are reachable as
-`host.docker.internal`, and the network rule for them is written with the loopback name — a rule for
-`localhost:11434` is what makes `host.docker.internal:11434` reachable.
+`host.docker.internal`, and the network rule for them is written with the loopback name — a
+`localhost:11434` entry in the kit's `network-policy@1` `runtime.allow` list is what makes
+`host.docker.internal:11434` reachable.
 
 ### Migrating a v2 kit (sbx v0.51.0)
 
@@ -360,7 +375,8 @@ removing or renaming any file in it counts as a change. Moving your checkout som
 from the current kit. It does not use `sbx kit add`. Since sbx v0.48.0 that command can replace a kit
 in place and keep the container, but it reruns the kit's install steps on top of whatever the
 container already holds, so the result depends on the sandbox's history rather than on the kit
-([#37](https://github.com/SebastianKuehnau/agent-cli/issues/37)). Recreating loses whatever exists
+([#37](https://github.com/SebastianKuehnau/agent-cli/issues/37)); since v0.51.0 it also asks for
+confirmation on a terminal whenever the kit changed. Recreating loses whatever exists
 only inside the container, so `task-agent` asks first, and tells you what is at stake:
 
 ```text
