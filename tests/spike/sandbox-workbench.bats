@@ -35,9 +35,9 @@ setup() {
   # `shell` rather than `claude`, so no agent authentication is needed.
   mkdir -p "$REPO/.sbx/kit"
   cat >"$REPO/.sbx/kit/spec.yaml" <<'EOF'
-schemaVersion: "2"
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
 kind: mixin
-name: agent-cli-spike
 displayName: agent-cli workbench spike
 description: Minimal kit used only to verify workbench behaviour.
 EOF

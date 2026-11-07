@@ -15,7 +15,7 @@ setup() {
 
   # A project that has been initialised.
   mkdir -p "$REPO/.sbx/kit"
-  printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
 
   make_fake_sbx "$TMP/fake"
 
@@ -228,7 +228,7 @@ recorded_digest() {
 }
 
 change_kit() {
-  printf 'schemaVersion: "2"\nkind: mixin\nname: changed\n' >"$REPO/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\ndisplayName: changed\n' >"$REPO/.sbx/kit/spec.yaml"
 }
 
 # sbx_subcommands — the sbx subcommands invoked, in order, one per line.
@@ -304,6 +304,68 @@ arg:run"
   [[ "$stderr" == *"cannot be resumed"* ]] ||
     fail "the loss that actually bites is not named: $stderr"
   [[ "$stderr" == *"not affected"* ]] || fail "worktree safety not stated: $stderr"
+}
+
+# --- a schema v2 kit (issue #43) ---------------------------------------------
+#
+# sbx v0.51.0 composes the claude agent only with v3 kits. A v2 project kit must
+# therefore never reach `sbx create` — and above all never a recreate, whose
+# `sbx rm` would succeed and whose `sbx create` would then fail, leaving nothing.
+
+legacy_kit() {
+  printf 'schemaVersion: "2"\nkind: mixin\nname: %s\n' "${1:-legacy}" >"$REPO/.sbx/kit/spec.yaml"
+}
+
+@test "a v2 kit is refused before a sandbox is created, naming the migration" {
+  legacy_kit
+  task feature/new-crud
+  assert_failure
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "0"
+  [[ "$stderr" == *"schema v2 Sandbox Kit"* ]] || fail "reason not given: $stderr"
+  [[ "$stderr" == *"mv .sbx/kit .sbx/kit.v2"* ]] || fail "no migration offered: $stderr"
+}
+
+@test "a v2 kit still lets an existing sandbox be attached to" {
+  task feature/new-crud
+  assert_success
+  legacy_kit
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  # The sandbox built earlier keeps working: the legacy kit is reported as not
+  # applicable rather than refused, because attaching needs no create.
+  task feature/new-crud
+  assert_success
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "0"
+  assert_equal "$(fake_sbx_subcommand_call_count run)" "2"
+}
+
+@test "a changed v2 kit never removes the sandbox, even when told to recreate" {
+  task feature/new-crud
+  assert_success
+  local before
+  before="$(recorded_digest "$(expected_sandbox feature/new-crud)")"
+  legacy_kit
+  : >"$FAKE_SBX_DIR/calls.log"
+
+  TASK_AGENT_KIT_RECREATE=yes task feature/new-crud
+  assert_success
+
+  assert_equal "$(sbx_subcommands)" "arg:ls
+arg:run"
+  [[ "$stderr" == *"kept as it is"* ]] || fail "skip not reported: $stderr"
+  [[ "$stderr" == *"mv .sbx/kit .sbx/kit.v2"* ]] || fail "no migration offered: $stderr"
+  # A skip is never recorded, so a migrated kit is offered next time.
+  assert_equal "$(recorded_digest "$(expected_sandbox feature/new-crud)")" "$before"
+}
+
+@test "a kit whose schema task-agent cannot tell is left for sbx to judge" {
+  # Only a literal v1/v2 schemaVersion is refused; anything else reaches sbx.
+  printf '# syntax=docker/sandbox-kit:3\n# kit:\n#   schemaVersion: "2"\n' >"$REPO/.sbx/kit/spec.yaml"
+  task feature/new-crud
+  assert_success
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "1"
 }
 
 @test "TASK_AGENT_KIT_RECREATE=yes recreates the sandbox from the changed kit" {
@@ -551,7 +613,7 @@ arg:run"
   local spacey="$TMP/my project with spaces"
   make_repo "$spacey" >/dev/null
   mkdir -p "$spacey/.sbx/kit"
-  printf 'schemaVersion: "2"\n' >"$spacey/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\n' >"$spacey/.sbx/kit/spec.yaml"
 
   run --separate-stderr bash -c \
     "cd '$spacey' && '$TASK_AGENT' feature/new-crud"

@@ -44,9 +44,9 @@ setup() {
 
   mkdir -p "$REPO/.sbx/kit"
   cat >"$REPO/.sbx/kit/spec.yaml" <<'EOF'
-schemaVersion: "2"
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
 kind: mixin
-name: agent-cli-spike
 displayName: agent-cli sandbox-attach spike
 description: Minimal kit used only to verify the re-attach argv.
 EOF

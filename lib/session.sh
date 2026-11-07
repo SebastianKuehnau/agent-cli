@@ -92,6 +92,7 @@ session_start() {
       "task-agent --done <branch>" \
       "$worktree" "$(git_git_metadata_dir "$main_root")"
   else
+    scaffold_require_current_kit "$main_root"
     info "Creating sandbox '$sandbox'"
     sandbox_create \
       "$sandbox" \
@@ -149,6 +150,16 @@ session_sync_kit() {
   if [[ -z "$applied" ]]; then
     info "Recording the current Sandbox Kit for '$sandbox' (it was not tracked yet)"
     kit_cache_write "$main_root" "$sandbox" "$kit_hash" || true
+    return 0
+  fi
+
+  # Checked before asking and before removing anything: a recreate from a v2 kit
+  # on sbx v0.51.0+ would remove the sandbox and then fail to create its
+  # replacement, leaving nothing (issue #43). The existing sandbox still works,
+  # so it is kept, and — like any skip — nothing is recorded.
+  if scaffold_kit_is_legacy "$main_root"; then
+    warning "The Sandbox Kit changed, but '$sandbox' is kept as it is."
+    scaffold_legacy_kit_lines >&2
     return 0
   fi
 
@@ -383,6 +394,7 @@ session_workbench_start() {
     session_sync_kit "$main_root" "$sandbox" "$kit_dir" "$kit_hash" \
       "task-agent --done --here" "$main_root"
   else
+    scaffold_require_current_kit "$main_root"
     info "Creating workbench '$sandbox'"
     sandbox_create "$sandbox" "$kit_dir" "$main_root"
     [[ -n "$kit_hash" ]] && kit_cache_write "$main_root" "$sandbox" "$kit_hash"

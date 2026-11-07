@@ -17,7 +17,7 @@ setup() {
   make_repo "$REPO" >/dev/null
 
   mkdir -p "$REPO/.sbx/kit"
-  printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
 
   make_fake_sbx "$TMP/fake"
 
@@ -178,6 +178,26 @@ expected_worktree() {
   assert_success
   assert_equal "$(fake_sbx_subcommand_call_count rm)" "0"
   [[ "$stderr" == *"task-agent --done --here"* ]] || fail "unexpected stderr: $stderr"
+}
+
+@test "a v2 kit is refused before the workbench is created" {
+  printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
+  task --here
+  assert_failure
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "0"
+  [[ "$stderr" == *"schema v2 Sandbox Kit"* ]] || fail "reason not given: $stderr"
+}
+
+@test "a changed v2 kit never removes the workbench, even when told to recreate" {
+  task --here
+  assert_success
+  printf 'schemaVersion: "2"\nkind: mixin\n' >"$REPO/.sbx/kit/spec.yaml"
+
+  TASK_AGENT_KIT_RECREATE=yes task --here
+  assert_success
+  assert_equal "$(fake_sbx_subcommand_call_count rm)" "0"
+  assert_equal "$(fake_sbx_subcommand_call_count create)" "1"
+  [[ "$stderr" == *"kept as it is"* ]] || fail "skip not reported: $stderr"
 }
 
 # --- --here inside a task's worktree ------------------------------------------

@@ -17,9 +17,10 @@ setup() {
 
   FIXTURE="$TMP/spec.yaml"
   cat >"$FIXTURE" <<'EOF'
-schemaVersion: "2"
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
 kind: mixin
-name: my-project
+displayName: my-project
 EOF
 }
 
@@ -233,11 +234,11 @@ make_preset_base() {
   BASE="$TMP/preset-base"
   mkdir -p "$BASE/presets/generic" "$BASE/presets/vaadin" \
     "$BASE/presets/vaadin-claude"
-  printf 'schemaVersion: "2"\nkind: mixin\nname: generic-marker\n' \
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\ndisplayName: generic-marker\n' \
     >"$BASE/presets/generic/spec.yaml"
-  printf 'schemaVersion: "2"\nkind: mixin\nname: __PROJECT__\ndisplayName: __PROJECT__ env\n' \
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\ndisplayName: __PROJECT__ env\ndescription: __PROJECT__ kit\n' \
     >"$BASE/presets/vaadin/spec.yaml"
-  printf 'schemaVersion: "2"\nkind: mixin\nname: __PROJECT__\ndisplayName: __PROJECT__ claude\n' \
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\ndisplayName: __PROJECT__ claude\ndescription: __PROJECT__ kit\n' \
     >"$BASE/presets/vaadin-claude/spec.yaml"
 }
 
@@ -255,7 +256,7 @@ init_preset() {
   make_preset_base
   init_preset "$REPO"
   assert_success
-  grep -q 'name: generic-marker' "$REPO/.sbx/kit/spec.yaml" ||
+  grep -q 'displayName: generic-marker' "$REPO/.sbx/kit/spec.yaml" ||
     fail "did not get the generic preset: $(cat "$REPO/.sbx/kit/spec.yaml")"
   [[ "$stderr" == *"'generic' preset"* ]] || fail "unexpected stderr: $stderr"
 }
@@ -318,7 +319,7 @@ init_preset() {
   make_preset_base
   init_preset "$REPO" vaadin
   assert_success
-  grep -q '^name: my-app$' "$REPO/.sbx/kit/spec.yaml" ||
+  grep -q '^displayName: my-app env$' "$REPO/.sbx/kit/spec.yaml" ||
     fail "placeholder not substituted: $(cat "$REPO/.sbx/kit/spec.yaml")"
   ! grep -q '__PROJECT__' "$REPO/.sbx/kit/spec.yaml" ||
     fail "placeholder survived: $(cat "$REPO/.sbx/kit/spec.yaml")"
@@ -339,7 +340,7 @@ init_preset() {
   make_repo "$spacey" >/dev/null
   init_preset "$spacey" vaadin
   assert_success
-  grep -q '^name: my-vaadin-app$' "$spacey/.sbx/kit/spec.yaml" ||
+  grep -q '^displayName: my-vaadin-app env$' "$spacey/.sbx/kit/spec.yaml" ||
     fail "unexpected name: $(cat "$spacey/.sbx/kit/spec.yaml")"
 }
 
@@ -435,24 +436,46 @@ init_preset() {
   done
 }
 
-@test "every shipped preset uses the __PROJECT__ placeholder as its name" {
+@test "every shipped preset uses the __PROJECT__ placeholder in its display name" {
+  # v3 has no `name:` field (strict decoding rejects it), so displayName is
+  # where the project's name goes.
   local root="${AGENT_LIB%/lib}" name
   for name in generic vaadin vaadin-claude; do
-    grep -q '^name: __PROJECT__$' "$root/presets/$name/spec.yaml" ||
-      fail "preset '$name' does not use the placeholder as its name"
+    grep -q '^displayName: __PROJECT__ ' "$root/presets/$name/spec.yaml" ||
+      fail "preset '$name' does not use the placeholder in its display name"
   done
 }
 
-@test "every shipped preset declares schema version 2" {
-  local root="${AGENT_LIB%/lib}" name
+@test "every shipped preset is a schema v3 kit" {
+  # sbx v0.51.0 resolves the claude agent to a v3 kit and refuses to compose it
+  # with v1/v2 kits (issue #43). Without the syntax line on line 1, sbx parses
+  # the file as a Dockerfile.
+  local root="${AGENT_LIB%/lib}" name spec
   for name in generic vaadin vaadin-claude; do
-    grep -q '^schemaVersion: "2"$' "$root/presets/$name/spec.yaml" ||
-      fail "preset '$name' is not schema version 2"
+    spec="$root/presets/$name/spec.yaml"
+    assert_equal "$(head -n 1 "$spec")" "# syntax=docker/sandbox-kit:3"
+    grep -q '^schemaVersion: "3"$' "$spec" ||
+      fail "preset '$name' is not schema version 3"
+    ! grep -Eq '^(name|setup|environment|permissions):' "$spec" ||
+      fail "preset '$name' still uses a v2 top-level key"
+  done
+}
+
+@test "every shipped preset installs JDK 25 and fills its truststore" {
+  # The v3 claude workload ships no JDK, and its truststore stays empty until
+  # update-ca-certificates runs — Maven then fails on every download.
+  local root="${AGENT_LIB%/lib}" name spec
+  for name in generic vaadin vaadin-claude; do
+    spec="$root/presets/$name/spec.yaml"
+    grep -q 'openjdk-25-jdk-headless' "$spec" ||
+      fail "preset '$name' installs no JDK 25"
+    grep -q 'update-ca-certificates -f' "$spec" ||
+      fail "preset '$name' leaves the Java truststore empty"
   done
 }
 
 @test "every shipped preset updates Claude Code at setup time" {
-  # The template image bakes in whatever Claude Code was current when it was
+  # The workload image bakes in whatever Claude Code was current when it was
   # built, and nothing in a sandbox ever refreshes it (issue #19). Every preset
   # has to ask, including the generic one — an agent weeks out of date is not a
   # Vaadin-specific problem.
@@ -516,8 +539,8 @@ init_preset() {
 
   run --separate-stderr bash -c "cd '$REPO' && '$TASK_AGENT' --init vaadin"
   assert_success
-  grep -q '^name: my-app$' "$REPO/.sbx/kit/spec.yaml" ||
-    fail "unexpected name: $(grep '^name:' "$REPO/.sbx/kit/spec.yaml")"
+  grep -q '^displayName: my-app ' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "unexpected name: $(grep '^displayName:' "$REPO/.sbx/kit/spec.yaml")"
 }
 
 @test "the real vaadin-claude preset URL is reachable and substituted (TASK_AGENT_NETWORK_TESTS=1)" {
@@ -528,8 +551,8 @@ init_preset() {
 
   run --separate-stderr bash -c "cd '$REPO' && '$TASK_AGENT' --init vaadin-claude"
   assert_success
-  grep -q '^name: my-app$' "$REPO/.sbx/kit/spec.yaml" ||
-    fail "unexpected name: $(grep '^name:' "$REPO/.sbx/kit/spec.yaml")"
+  grep -q '^displayName: my-app ' "$REPO/.sbx/kit/spec.yaml" ||
+    fail "unexpected name: $(grep '^displayName:' "$REPO/.sbx/kit/spec.yaml")"
 }
 
 # --- the vaadin-claude preset's agent configuration -------------------------

@@ -53,6 +53,50 @@ scaffold_require_kit() {
       ""
 }
 
+# scaffold_kit_is_legacy <main-repo-root>
+#
+# 0 when the project kit is a schema v1/v2 kit, which sbx v0.51.0 and later
+# cannot compose with the claude agent: `claude` resolves to a v3 kit there, and
+# sbx refuses to mix formats in one sandbox (issue #43).
+#
+# Deliberately narrow: only an uncommented top-level `schemaVersion: "1"`/`"2"`
+# counts. Anything else — v3 in any of its authoring forms, or a file this
+# cannot read — is left for sbx to judge, so this can never refuse a kit sbx
+# would have accepted.
+scaffold_kit_is_legacy() {
+  local spec
+  spec="$(scaffold_kit_spec "$1")"
+  [[ -f "$spec" ]] || return 1
+  grep -Eq '^schemaVersion:[[:space:]]*"?[12]"?[[:space:]]*$' "$spec"
+}
+
+# scaffold_legacy_kit_lines — the explanation both refusals of a legacy kit
+# print, one argument per line, for `die` or `warning`.
+scaffold_legacy_kit_lines() {
+  printf '%s\n' \
+    "$AGENT_KIT_RELATIVE_SPEC is a schema v2 Sandbox Kit, and sbx v0.51.0 and later" \
+    "only combine the claude agent with v3 kits." \
+    "" \
+    "Migrate it by starting from a v3 preset and carrying your changes over:" \
+    "" \
+    "  mv .sbx/kit .sbx/kit.v2" \
+    "  task-agent --init [generic|vaadin|vaadin-claude]" \
+    ""
+}
+
+# scaffold_require_current_kit <main-repo-root>
+#
+# Fail before a sandbox would be created from a legacy kit. Called right before
+# sandbox_create on the paths that create, so attaching to a sandbox that
+# already exists keeps working with the kit it was built from.
+scaffold_require_current_kit() {
+  scaffold_kit_is_legacy "$1" || return 0
+  local lines=()
+  local line
+  while IFS= read -r line; do lines+=("$line"); done < <(scaffold_legacy_kit_lines)
+  die "${lines[@]}"
+}
+
 # scaffold_kit_hash <main-repo-root>
 #
 # Print a digest of the project's *entire* Sandbox Kit, or fail if there is no

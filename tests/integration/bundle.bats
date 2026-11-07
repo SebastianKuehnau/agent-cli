@@ -79,7 +79,7 @@ setup() {
   local repo="$TMP/my-app-done"
   make_repo "$repo" >/dev/null
   mkdir -p "$repo/.sbx/kit"
-  printf 'schemaVersion: "2"\n' >"$repo/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\n' >"$repo/.sbx/kit/spec.yaml"
 
   run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
@@ -95,7 +95,7 @@ setup() {
   local repo="$TMP/my-app-rescue"
   make_repo "$repo" >/dev/null
   mkdir -p "$repo/.sbx/kit"
-  printf 'schemaVersion: "2"\n' >"$repo/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\n' >"$repo/.sbx/kit/spec.yaml"
 
   run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
@@ -111,13 +111,13 @@ setup() {
   local repo="$TMP/my-app-kit"
   make_repo "$repo" >/dev/null
   mkdir -p "$repo/.sbx/kit"
-  printf 'schemaVersion: "2"\n' >"$repo/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\n' >"$repo/.sbx/kit/spec.yaml"
 
   run --separate-stderr bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
   : >"$FAKE_SBX_DIR/calls.log"
 
-  printf 'schemaVersion: "2"\nname: changed\n' >"$repo/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\ndisplayName: changed\n' >"$repo/.sbx/kit/spec.yaml"
   run --separate-stderr env TASK_AGENT_KIT_RECREATE=yes \
     bash -c "cd '$repo' && '$INSTALL_DIR/task-agent' feature/x"
   assert_success
@@ -167,7 +167,7 @@ arg:run"
   local repo="$TMP/my-app"
   make_repo "$repo" >/dev/null
   mkdir -p "$repo/.sbx/kit"
-  printf 'schemaVersion: "2"\nkind: mixin\n' >"$repo/.sbx/kit/spec.yaml"
+  printf '# syntax=docker/sandbox-kit:3\nschemaVersion: "3"\nkind: mixin\n' >"$repo/.sbx/kit/spec.yaml"
 
   run --separate-stderr bash -c \
     "cd '$repo' && '$INSTALL_DIR/task-agent' feature/new-crud"

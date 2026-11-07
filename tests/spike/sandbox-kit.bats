@@ -84,22 +84,26 @@ teardown() {
 write_kit() {
   local value="${2:-one}"
   cat >"$KIT_DIR/spec.yaml" <<EOF
-schemaVersion: "2"
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
 kind: mixin
-name: agent-cli-spike
 displayName: agent-cli sandbox-kit spike
 description: $1
-setup:
-  install:
-    - command: "echo $value >> /tmp/spike-setup.log"
-      user: "1000"
-environment:
-  variables:
-    SPIKE_VALUE: "$value"
-permissions:
-  network:
-    allow:
-      - agent-cli-spike-$value.example.com
+args:
+  spikeValue:
+    default: "$value"
+    env: SPIKE_VALUE
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - agent-cli-spike-$value.example.com
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        - command: "echo $value >> /tmp/spike-setup.log"
+          user: "1000"
 EOF
 }
 
