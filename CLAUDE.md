@@ -398,7 +398,10 @@ Four rules hold this together:
    reuse inheriting "files, Docker images, or agent session history" from a deleted sandbox; on older
    versions the same transcript could be rescued again, which costs a re-copy and nothing else. A
    size-or-mtime comparison would also rest on `sbx cp` preserving mtime, which `sbx cp --help` does
-   not promise.
+   not promise. The kit spec has since made `volume@1` block storage outlive `sbx rm` and reattach
+   under the same name (docker/sandbox-kit-spec#209, issue #45). That would break this rule — and
+   `--done`'s clean teardown — the day a volume covers `~/.claude`. Nothing did on v0.51.0, and
+   `tests/spike/sandbox-volume.bats` fails when that changes.
 4. **An invalid `TASK_AGENT_RESCUE_TRANSCRIPTS` fails, and fails early.** It is validated at the top of
    `session_start` and `session_done`, before anything is created or removed, so a typo costs a re-run
    rather than a half-torn-down task. Values are `yes` (the default) and `no`, matching
