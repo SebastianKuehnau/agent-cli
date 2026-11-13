@@ -855,7 +855,7 @@ arg:run"
 @test "a clean main checkout gets no uncommitted-changes note" {
   git_quiet -C "$REPO" checkout --quiet -b feature/base
   # The kit is untracked; commit it so the checkout is genuinely clean.
-  git_quiet -C "$REPO" add .sbx
+  git_quiet -C "$REPO" -c core.excludesFile=/dev/null add .sbx
   git_quiet -C "$REPO" commit --quiet -m kit
   run git -c core.excludesFile=/dev/null -C "$REPO" status --porcelain
   assert_equal "$output" ""
