@@ -398,7 +398,11 @@ Four rules hold this together:
    reuse inheriting "files, Docker images, or agent session history" from a deleted sandbox; on older
    versions the same transcript could be rescued again, which costs a re-copy and nothing else. A
    size-or-mtime comparison would also rest on `sbx cp` preserving mtime, which `sbx cp --help` does
-   not promise.
+   not promise. The kit spec has since made `volume@1` block storage outlive `sbx rm` and reattach
+   under the same name (docker/sandbox-kit-spec#209, issue #45). That would break this rule — and
+   `--done`'s clean teardown — the day a volume covers `~/.claude`. Measured on sbx v0.53.0: sbx
+   mounts a kit's `volume@1` path but does not yet retain it across `sbx rm`, and the claude agent
+   puts no volume under `~/.claude`. `tests/spike/sandbox-volume.bats` fails when either changes.
 4. **An invalid `TASK_AGENT_RESCUE_TRANSCRIPTS` fails, and fails early.** It is validated at the top of
    `session_start` and `session_done`, before anything is created or removed, so a typo costs a re-run
    rather than a half-torn-down task. Values are `yes` (the default) and `no`, matching
@@ -478,7 +482,7 @@ idempotent. task-agent cannot guarantee that for users' kits, so it keeps remove
 change is visible; reopen #37 rather than switching on the strength of a passing spike. On v0.51.0
 (v3 kits) re-adding an *unchanged* kit still succeeds, but adding a *changed* one asks for
 confirmation on a terminal and has no flag to skip it (`error: stdin is not a terminal`), so the six
-spikes that add a changed kit fail there — one more reason, not a reason to switch.
+spikes that add a changed kit fail there (unchanged on v0.53.0) — one more reason, not a reason to switch.
 
 **A v2 project kit (issue #43).** On sbx v0.51.0 a recreate from a v2 kit would succeed at
 `sbx rm` and then fail at `sbx create`, leaving nothing. `scaffold_kit_is_legacy` recognises an
