@@ -18,12 +18,13 @@
 #   - the kit-recreate warning ("the session itself cannot be resumed
 #     afterwards") becomes wrong, in the harmless direction.
 #
-# Read statically on 2026-11-13, before this spike had run: the spec repo's own
-# sbx TCK adapter (tck/adapters/sbx) leaves volume@1 *unclaimed* because "sbx
-# mounts nothing at a declared volume path", and sbx v0.53.0's release notes
-# mention no volume retention. So the first two sections are expected to pass on
-# v0.53.0. They are written to fail the day that changes, which is the signal to
-# reopen #45 — not to adjust the assertions.
+# Measured on sbx v0.53.0 (2026-11-13): sbx now *mounts* storage at a kit's
+# volume@1 path — the spec repo's own sbx TCK adapter still said it mounts
+# nothing as of 2026-11-09 — but that storage does not survive `sbx rm`, and the
+# claude agent puts no volume under ~/.claude at all. So nothing task-agent
+# relies on has changed yet. The tests that would catch the retention part of
+# spec#209 are written to fail the day it ships, which is the signal to reopen
+# #45 — not to adjust the assertions.
 #
 # The third section answers the other open question from the same spec update:
 # which of a task sandbox's two workspaces (the worktree, then the main
@@ -162,19 +163,22 @@ EOF
   assert_success
 }
 
-@test "sbx mounts nothing at a kit's volume@1 path" {
-  # What the spec repo's sbx TCK adapter states as of 2026-11-09. Failing here
-  # means sbx has started implementing volume@1: re-measure the next test and
-  # the claude agent's kit (issue #45).
+@test "sbx mounts storage at a kit's volume@1 path" {
+  # New in v0.53.0: up to the spec repo's TCK adapter of 2026-11-09, sbx mounted
+  # nothing there and a write at the path failed. A mount alone changes nothing
+  # for task-agent; the next test is the one that would.
   write_kit "$(volume_capability)"
   sbx create --kit "$KIT_DIR" --name "$SANDBOX" shell "$REPO"
 
   run in_sandbox awk -v p="$VOLUME_PATH" '$5 == p { print $5 }' /proc/self/mountinfo
   assert_success
-  assert_equal "$output" ""
+  assert_equal "$output" "$VOLUME_PATH"
 }
 
 @test "a file at a kit's volume@1 path does not survive sbx rm and create" {
+  # The retention docker/sandbox-kit-spec#209 requires. Not implemented in
+  # v0.53.0. When this fails, do the follow-up in issue #45: decide whether
+  # --done must remove retained storage, and with which sbx command.
   write_kit "$(volume_capability)"
   sbx create --kit "$KIT_DIR" --name "$SANDBOX" shell "$REPO"
 
