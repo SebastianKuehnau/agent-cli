@@ -235,6 +235,9 @@ Two details are load-bearing if you edit those steps:
   from a kit: the file would land on your machine, not in the sandbox. Skills belong in plugins,
   which are container-local.
 
+If sandbox creation fails at **Install the … plugin** with `HTTPS authentication failed`, see
+[GitHub in the sandbox](#github-in-the-sandbox): a stale GitHub secret is the usual cause.
+
 The kit is yours once `--init` has copied it: deleting the status-line step, or moving it into a
 kit that started from `generic`, is an ordinary edit. A changed kit reaches an existing sandbox only
 by recreating it, which `task-agent <branch>` offers to do.
@@ -309,6 +312,22 @@ sbx secret set github -t "$(gh auth token)"                            # all fut
 
 `task-agent --list` shows the sandbox name. The presets also allow `api.github.com` and
 `objects.githubusercontent.com` at runtime so `gh` can reach its API.
+
+`-t` stores the token **as it is now**, and a stored token that has expired or been revoked is
+worse than none. The sbx proxy adds it to *every* request to github.com — including the public
+plugin marketplaces the `vaadin-claude` preset clones while the sandbox is built — and GitHub
+answers a bad token with `401` instead of ignoring it. Sandbox creation then fails at
+**Install the … plugin** with `HTTPS authentication failed` / `unable to get password from user`
+(issue #52). Store a *source* instead, so the secret cannot go stale, or remove it:
+
+```bash
+sbx secret set github --command 'gh auth token' --refresh on-demand   # resolved on the host when needed
+sbx secret rm github                                                  # no token: public repos only
+```
+
+A secret stored for one sandbox (`sbx secret ls` shows its name as the scope) is separate from the
+global one and can be just as stale: `sbx secret rm github --sandbox <name>`. A fine-grained PAT
+behind `gh auth token` (e.g. in `GH_TOKEN`) still expires on its own date.
 
 #### Ports
 
