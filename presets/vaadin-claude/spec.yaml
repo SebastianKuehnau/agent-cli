@@ -31,14 +31,6 @@ args:
     description: JAVA_HOME inside the sandbox
     env: JAVA_HOME
 
-  # Server/offline license key for Pro components, TestBench and other commercial
-  # Vaadin products (issue #48). Empty by default: paste a *server* license key
-  # here for this sandbox only, and do not commit it.
-  vaadinOfflineKey:
-    default: ""
-    description: Vaadin server license key (VAADIN_OFFLINE_KEY)
-    env: VAADIN_OFFLINE_KEY
-
 capabilities:
   - type: com.docker.sandbox/network-policy@1
     config:
@@ -83,9 +75,6 @@ capabilities:
           - vaadin.com
           - mcp.vaadin.com
           - www.javadocs.dev
-
-          # Vaadin license check (Pro components, TestBench).
-          - tools.vaadin.com
 
           # Playwright browsers: primary host plus the installer's fallback.
           - cdn.playwright.dev

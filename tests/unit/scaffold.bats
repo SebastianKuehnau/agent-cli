@@ -598,18 +598,16 @@ init_preset() {
     fail "the vaadin-claude preset does not install the general skills"
 }
 
-@test "vaadin presets default to JetBrains Runtime and carry the license key arg (#48, #49)" {
+@test "vaadin presets default to JetBrains Runtime (#49)" {
   local name spec
   for name in vaadin vaadin-claude; do
     spec="$BATS_TEST_DIRNAME/../../presets/$name/spec.yaml"
     grep -q 'intellij-jbr/' "$spec" || fail "preset '$name' does not install JBR"
     grep -q 'cache-redirector.jetbrains.com' "$spec" || fail "preset '$name' does not allow the JBR host"
-    grep -q 'env: VAADIN_OFFLINE_KEY' "$spec" || fail "preset '$name' has no license key arg"
-    grep -q 'tools.vaadin.com' "$spec" || fail "preset '$name' does not allow the license host"
   done
 }
 
-@test "every shipped preset reaches the GitHub API at runtime (#50)" {
+@test "every shipped preset reaches the GitHub API at runtime" {
   local name spec
   for name in generic vaadin vaadin-claude; do
     spec="$BATS_TEST_DIRNAME/../../presets/$name/spec.yaml"

@@ -295,6 +295,21 @@ The other option is to publish the key yourself with `sbx create --env`, outside
 a `--env` passthrough to `task-agent`, or a Vaadin-specific mount step, is a deliberate non-decision —
 see [ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).
 
+#### GitHub in the sandbox
+
+`git push`, `gh` and anything else that talks to GitHub from inside a sandbox needs your GitHub token
+stored as an `sbx` secret. Without it you get `401 Bad credentials` or
+`could not read Username for 'https://github.com'`. `task-agent` runs inside the sandbox and cannot
+set it, so run this once on your **host**:
+
+```bash
+sbx secret set github --sandbox <sandbox-name> -t "$(gh auth token)"   # an existing sandbox, at once
+sbx secret set github -t "$(gh auth token)"                            # all future sandboxes
+```
+
+`task-agent --list` shows the sandbox name. The presets also allow `api.github.com` and
+`objects.githubusercontent.com` at runtime so `gh` can reach its API.
+
 #### Ports
 
 To publish a port on a running sandbox, at a host port you choose:
