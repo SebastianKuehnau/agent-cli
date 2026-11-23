@@ -26,6 +26,14 @@ args:
     description: JAVA_HOME inside the sandbox
     env: JAVA_HOME
 
+  # Server/offline license key for Pro components, TestBench and other commercial
+  # Vaadin products (issue #48). Empty by default: paste a *server* license key
+  # here for this sandbox only, and do not commit it.
+  vaadinOfflineKey:
+    default: ""
+    description: Vaadin server license key (VAADIN_OFFLINE_KEY)
+    env: VAADIN_OFFLINE_KEY
+
 capabilities:
   - type: com.docker.sandbox/network-policy@1
     config:
@@ -49,6 +57,9 @@ capabilities:
           - playwright.download.prss.microsoft.com
           - storage.googleapis.com
 
+          # JetBrains Runtime download.
+          - cache-redirector.jetbrains.com
+
       runtime:
         allow:
           # Maven. No `mvn` in the image; the wrapper downloads it from here.
@@ -60,11 +71,16 @@ capabilities:
           - github.com
           - codeload.github.com
           - raw.githubusercontent.com
+          - api.github.com
+          - objects.githubusercontent.com
 
           # Vaadin docs, MCP, Javadoc.
           - vaadin.com
           - mcp.vaadin.com
           - www.javadocs.dev
+
+          # Vaadin license check (Pro components, TestBench).
+          - tools.vaadin.com
 
           # Playwright browsers: primary host plus the installer's fallback.
           - cdn.playwright.dev
@@ -101,6 +117,26 @@ capabilities:
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends openjdk-25-jdk-headless ca-certificates-java nodejs npm
             update-ca-certificates -f
             ln -sfn "$(ls -d /usr/lib/jvm/java-25-openjdk-*)" /usr/lib/jvm/default-java
+
+            # JetBrains Runtime as the default JDK (issue #49): the Vaadin dev loop
+            # hot-swaps with it. OpenJDK above stays installed as the fallback and
+            # as the source of the filled truststore. JBR only replaces default-java
+            # when the download is a real JDK (has javac).
+            case "$(uname -m)" in x86_64) jbr_arch=x64 ;; aarch64) jbr_arch=aarch64 ;; *) jbr_arch= ;; esac
+            jbr_file="jbr-25.0.5.1-linux-${jbr_arch}-b635.102.tar.gz"
+            if [ -n "$jbr_arch" ] && curl -fsSL -o /tmp/jbr.tgz "https://cache-redirector.jetbrains.com/intellij-jbr/${jbr_file}"; then
+              rm -rf /usr/lib/jvm/jbr-25 && mkdir -p /usr/lib/jvm/jbr-25
+              tar -xzf /tmp/jbr.tgz -C /usr/lib/jvm/jbr-25 --strip-components=1
+              rm -f /tmp/jbr.tgz
+              if [ -x /usr/lib/jvm/jbr-25/bin/javac ]; then
+                ln -sfn /etc/ssl/certs/java/cacerts /usr/lib/jvm/jbr-25/lib/security/cacerts
+                ln -sfn /usr/lib/jvm/jbr-25 /usr/lib/jvm/default-java
+              else
+                echo "JBR download is not a JDK; keeping OpenJDK" >&2
+              fi
+            else
+              echo "JBR unavailable; keeping OpenJDK" >&2
+            fi
 
         # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
         - description: Install the Vaadin Claude plugin
