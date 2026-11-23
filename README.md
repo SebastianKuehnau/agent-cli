@@ -235,6 +235,24 @@ Two details are load-bearing if you edit those steps:
   from a kit: the file would land on your machine, not in the sandbox. Skills belong in plugins,
   which are container-local.
 
+If sandbox creation fails at **Install the … plugin** with `HTTPS authentication failed` /
+`unable to get password from user`, check your stored sbx GitHub secret (issue #52). When a
+`github` service secret is stored (`sbx secret ls`), the sbx proxy adds it to **every** request to
+github.com, including clones of public repositories — and GitHub answers an expired or revoked
+token with `401 Bad credentials` instead of ignoring it. Store a *source* instead of a token, so
+the secret cannot go stale, or remove it:
+
+```bash
+# resolved on the host from your gh login whenever it is needed
+sbx secret set github --command 'gh auth token' --refresh on-demand
+# or: no token at all — public repositories need none
+sbx secret rm github
+```
+
+A secret stored for one sandbox (`sbx secret ls` shows its name as the scope) is separate from the
+global one and can be just as stale; remove it with `sbx secret rm github --sandbox <name>`. A
+fine-grained PAT behind `gh auth token` (e.g. in `GH_TOKEN`) still expires on its own date.
+
 The kit is yours once `--init` has copied it: deleting the status-line step, or moving it into a
 kit that started from `generic`, is an ordinary edit. A changed kit reaches an existing sandbox only
 by recreating it, which `task-agent <branch>` offers to do.
