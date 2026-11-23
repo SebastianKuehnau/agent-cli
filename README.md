@@ -302,28 +302,27 @@ see [ADR 0002](docs/adr/0002-ports-and-env-stay-outside-task-agent.md).
 
 `git push`, `gh` and anything else that talks to GitHub from inside a sandbox needs your GitHub token
 stored as an `sbx` secret. Without it you get `401 Bad credentials` or
-`could not read Username for 'https://github.com'`. `task-agent` runs inside the sandbox and cannot
-set it, so run this once on your **host**:
+`could not read Username for 'https://github.com'`. `task-agent` does not manage credentials, so run
+this once on your **host**:
 
 ```bash
-sbx secret set github --sandbox <sandbox-name> -t "$(gh auth token)"   # an existing sandbox, at once
-sbx secret set github -t "$(gh auth token)"                            # all future sandboxes
+sbx secret set github --command "$(command -v gh) auth token" --refresh on-demand                            # all future sandboxes
+sbx secret set github --sandbox <sandbox-name> --command "$(command -v gh) auth token" --refresh on-demand   # an existing sandbox, at once
 ```
 
-`task-agent --list` shows the sandbox name. The presets also allow `api.github.com` and
-`objects.githubusercontent.com` at runtime so `gh` can reach its API.
+`--command` stores a *source*, not a token: sbx runs `gh auth token` on the host whenever it needs
+the secret, so it follows your `gh` login and cannot go stale. The path is absolute because sbx runs
+the command from a fresh temporary directory, not from your shell. `task-agent --list` shows the
+sandbox name. The presets also allow `api.github.com` and `objects.githubusercontent.com` at runtime
+so `gh` can reach its API.
 
-`-t` stores the token **as it is now**, and a stored token that has expired or been revoked is
-worse than none. The sbx proxy adds it to *every* request to github.com — including the public
-plugin marketplaces the `vaadin-claude` preset clones while the sandbox is built — and GitHub
+Do not store the token itself (`-t "$(gh auth token)"`): a stored token that has expired or been
+revoked is worse than none. The sbx proxy adds it to *every* request to github.com — including the
+public plugin marketplaces the `vaadin-claude` preset clones while the sandbox is built — and GitHub
 answers a bad token with `401` instead of ignoring it. Sandbox creation then fails at
 **Install the … plugin** with `HTTPS authentication failed` / `unable to get password from user`
-(issue #52). Store a *source* instead, so the secret cannot go stale, or remove it:
-
-```bash
-sbx secret set github --command 'gh auth token' --refresh on-demand   # resolved on the host when needed
-sbx secret rm github                                                  # no token: public repos only
-```
+(issue #52). Replace such a secret with the `--command` form above, or remove it with
+`sbx secret rm github` — public repositories need no token.
 
 A secret stored for one sandbox (`sbx secret ls` shows its name as the scope) is separate from the
 global one and can be just as stale: `sbx secret rm github --sandbox <name>`. A fine-grained PAT
