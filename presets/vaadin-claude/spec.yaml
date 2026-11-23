@@ -135,10 +135,9 @@ capabilities:
         # Both plugin steps clone from github.com. If they fail with "HTTPS
         # authentication failed", the stored sbx `github` secret is invalid: the
         # proxy sends it with every github.com request, and GitHub rejects a bad
-        # token even for public repositories. Fix it with
-        # `sbx secret set github --command 'gh auth token' --refresh on-demand`
-        # or `sbx secret rm github`
-        # (issue #52).
+        # token even for public repositories. Fix it on the host with
+        # `sbx secret set github --command "$(command -v gh) auth token" --refresh on-demand`
+        # or `sbx secret rm github` (issue #52; README, "GitHub in the sandbox").
         #
         # Brings the Vaadin skills *and* the Vaadin MCP — no `sbx mcp add` needed.
         - description: Install the Vaadin Claude plugin
